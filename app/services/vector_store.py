@@ -1,9 +1,7 @@
-"""Vector store manager for FastAPI"""
+"""Vector store singleton — use ``get_vector_store_manager()`` from dependencies instead."""
 
-# Import from actual services
-from app.services.embeddings import VectorStoreManager
+from app.core.dependencies import get_vector_store_manager
 
-# Create singleton instance
-vector_store_manager = VectorStoreManager()
+vector_store_manager = get_vector_store_manager()
 
-__all__ = ['vector_store_manager']
+__all__ = ["vector_store_manager"]

@@ -1,93 +1,103 @@
-"""Configuration management for FastAPI app"""
+"""Unified configuration management for the Exam Prep Bot."""
 
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 from loguru import logger
+from pathlib import Path
 
 
 class Settings(BaseSettings):
-    """Application settings"""
-    
-    # App Settings
-    APP_NAME: str = "Exam Prep Bot"
-    APP_VERSION: str = "1.0.0"
-    DEBUG_MODE: bool = False
-    
-    # Server Settings
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    WORKERS: int = 4
-    
-    # CORS
-    CORS_ORIGINS: List[str] = ["*"]
-    
-    # API Settings
-    API_VERSION: str = "v1"
-    API_PREFIX: str = "/api/v1"
-    
+    """Application settings loaded from environment variables."""
+
+    # App
+    app_name: str = "Exam Prep Bot"
+    app_version: str = "1.0.0"
+    debug_mode: bool = False
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8000
+    workers: int = 4
+
+    # CORS — restrict in production; wildcard kept only for local dev
+    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    # API
+    api_version: str = "v1"
+    api_prefix: str = "/api/v1"
+
     # Anthropic
-    ANTHROPIC_API_KEY: str
-    MODEL_NAME: str = "claude-3-5-sonnet-20241022"
-    MAX_TOKENS: int = 1024
-    TEMPERATURE: float = 0.3
-    
+    anthropic_api_key: str
+    model_name: str = "claude-3-5-sonnet-20241022"
+    max_tokens: int = 1024
+    temperature: float = 0.3
+    top_p: float = 0.95
+
     # Document Processing
-    MAX_CHUNK_SIZE: int = 512
-    CHUNK_OVERLAP: int = 100
-    MIN_CHUNK_SIZE: int = 100
-    MAX_FILE_SIZE_MB: int = 50
-    ALLOWED_FILE_TYPES: str = "pdf,docx"
-    UPLOAD_DIR: str = "./uploads"
-    
+    max_chunk_size: int = 512
+    chunk_overlap: int = 100
+    min_chunk_size: int = 100
+    max_file_size_mb: int = 50
+    allowed_file_types: str = "pdf,docx"
+    upload_dir: str = "./uploads"
+
     # Embeddings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    VECTOR_DIMENSION: int = 384
-    BATCH_SIZE: int = 32
-    
-    # Vector Database
-    USE_FAISS: bool = True
-    FAISS_INDEX_PATH: str = "./data/faiss_index"
-    
+    embedding_model: str = "all-MiniLM-L6-v2"
+    vector_dimension: int = 384
+    batch_size: int = 32
+
+    # Vector Database — FAISS
+    use_faiss: bool = True
+    faiss_index_path: str = "./data/faiss_index"
+
     # Retrieval
-    RETRIEVAL_TOP_K: int = 5
-    RELEVANCE_THRESHOLD: float = 0.5
-    MIN_RELEVANCE_SCORE: float = 0.3
-    
+    retrieval_top_k: int = 5
+    relevance_threshold: float = 0.5
+    min_relevance_score: float = 0.3
+
     # Intent Classification
-    INTENT_CLASSIFICATION_THRESHOLD: float = 0.7
-    
+    intent_classification_threshold: float = 0.7
+    intent_embedding_model: str = "all-MiniLM-L6-v2"
+
     # Caching
-    ENABLE_QUERY_CACHE: bool = True
-    CACHE_TTL_SECONDS: int = 300
-    CACHE_DIR: str = "./cache"
-    USE_REDIS: bool = False
-    REDIS_URL: str = "redis://localhost:6379/0"
-    
+    enable_query_cache: bool = True
+    cache_ttl_seconds: int = 300
+    cache_dir: str = "./cache"
+    use_redis: bool = False
+    redis_url: str = "redis://localhost:6379/0"
+
     # Database
-    DATABASE_URL: str = "sqlite:///./exam_prep_bot.db"
-    
+    database_url: str = "sqlite:///./exam_prep_bot.db"
+
     # Logging
-    LOG_LEVEL: str = "INFO"
-    LOG_FILE: str = "./logs/app.log"
-    
+    log_level: str = "INFO"
+    log_file: str = "./logs/app.log"
+
     # Performance
-    ENABLE_ASYNC: bool = True
-    WORKER_THREADS: int = 4
-    QUERY_TIMEOUT_SECONDS: int = 30
-    
+    enable_async: bool = True
+    worker_threads: int = 4
+    query_timeout_seconds: int = 30
+
     # Development
-    DEVELOPMENT_MODE: bool = True
-    SAMPLE_DATA_DIR: str = "./data/sample_materials"
-    
+    development_mode: bool = True
+    sample_data_dir: str = "./data/sample_materials"
+
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
-# Load settings
+def _create_directories(s: Settings) -> None:
+    """Create necessary directories if they don't exist."""
+    for d in [s.upload_dir, s.cache_dir, s.faiss_index_path, "./logs", "./data"]:
+        Path(d).mkdir(parents=True, exist_ok=True)
+
+
 try:
     settings = Settings()
+    _create_directories(settings)
     logger.info("Settings loaded successfully")
 except Exception as e:
-    logger.error(f"Failed to load settings: {e}")
+    logger.error(f"Configuration error: {e}")
     raise

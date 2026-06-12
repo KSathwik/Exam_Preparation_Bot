@@ -1,13 +1,12 @@
-"""Pydantic schemas for FastAPI"""
+"""Pydantic schemas for FastAPI request/response models."""
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
 
 
 class QueryType(str, Enum):
-    """Intent types for queries"""
     DEFINITION = "definition"
     EXPLAIN = "explain"
     COMPARE = "compare"
@@ -15,24 +14,23 @@ class QueryType(str, Enum):
     VAGUE = "vague"
     EXAMPLE = "example"
     DIAGRAM = "diagram"
+    HOMEWORK = "homework"
 
 
-# ==================== Document Models ====================
+# ── Documents ────────────────────────────────────────────────────────
 
 class DocumentUploadResponse(BaseModel):
-    """Response after document upload"""
     success: bool
     file_name: str
     file_type: str
     total_chunks: int
     file_size_mb: float
     processing_time_seconds: float
-    document_id: str
+    document_id: Optional[str] = None
     message: str
 
 
 class DocumentInfo(BaseModel):
-    """Document information"""
     document_id: str
     file_name: str
     file_type: str
@@ -42,95 +40,78 @@ class DocumentInfo(BaseModel):
 
 
 class DocumentListResponse(BaseModel):
-    """List of documents"""
     success: bool
     total_documents: int
     documents: List[DocumentInfo]
 
 
-# ==================== Query Models ====================
+# ── Queries ──────────────────────────────────────────────────────────
 
 class QueryRequest(BaseModel):
-    """User query request"""
     query: str = Field(..., min_length=1, max_length=1000)
-    document_id: Optional[str] = None  # If None, search all documents
+    document_id: Optional[str] = None
+    session_id: Optional[str] = None
     top_k: Optional[int] = None
 
 
-class SourceCitation(BaseModel):
-    """Source citation"""
+class SourceCitationOut(BaseModel):
     page_number: int
     section_title: Optional[str] = None
     quoted_text: str
-    confidence: float
-    relevance_score: float
+    confidence: float = Field(ge=0, le=1)
+    relevance_score: float = Field(ge=0, le=1)
 
 
 class QueryResponse(BaseModel):
-    """Response to user query"""
     success: bool
     query: str
     answer: str
-    query_intent: QueryType
-    intent_confidence: float
-    sources: List[SourceCitation]
-    overall_confidence: float
-    hallucination_risk: str  # low, medium, high
+    query_intent: str
+    intent_confidence: float = Field(ge=0, le=1)
+    sources: List[SourceCitationOut]
+    overall_confidence: float = Field(ge=0, le=1)
+    hallucination_risk: str
     response_time_seconds: float
     format_type: str
+    timestamp: Optional[str] = None
 
 
-class QueryHistoryItem(BaseModel):
-    """Query history item"""
-    query_id: str
-    query: str
-    answer: str
-    intent: QueryType
-    confidence: float
-    timestamp: datetime
+# ── Chat ─────────────────────────────────────────────────────────────
 
-
-class ChatMessage(BaseModel):
-    """Chat message"""
-    role: str  # "user" or "assistant"
+class ChatMessageOut(BaseModel):
+    role: str
     content: str
-    timestamp: datetime
-    intent_type: Optional[QueryType] = None
+    timestamp: str
+    intent: Optional[str] = None
 
 
-class ChatSession(BaseModel):
-    """Chat session"""
-    session_id: str
-    document_id: Optional[str] = None
-    messages: List[ChatMessage]
-    created_at: datetime
-    updated_at: datetime
+# ── Batch ────────────────────────────────────────────────────────────
+
+class BatchQueryResult(BaseModel):
+    query: str
+    success: bool
+    answer: Optional[str] = None
+    confidence: Optional[float] = None
+    error: Optional[str] = None
 
 
-# ==================== Health & Status ====================
+class BatchQueryResponse(BaseModel):
+    total: int
+    successful: int
+    failed: int
+    results: List[BatchQueryResult]
+
+
+# ── System / Health ──────────────────────────────────────────────────
 
 class HealthResponse(BaseModel):
-    """Health check response"""
     status: str
     version: str
     service: str
+    bot_initialized: bool = True
 
-
-class StatsResponse(BaseModel):
-    """Statistics response"""
-    total_documents: int
-    total_chunks: int
-    embedding_dimension: int
-    embedding_model: str
-    total_queries_processed: int
-    average_response_time: float
-
-
-# ==================== Error Models ====================
 
 class ErrorResponse(BaseModel):
-    """Error response"""
     success: bool = False
     error: str
-    error_code: Optional[str] = None
-    details: Optional[dict] = None
+    detail: Optional[str] = None

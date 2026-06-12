@@ -1,18 +1,36 @@
-"""Database initialization and management"""
+"""Database initialization and session management."""
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 from loguru import logger
-from app.core.config import settings
 from pathlib import Path
 
+from app.core.config import settings
+from app.models.db_models import Base
 
-def init_db():
-    """Initialize database"""
+engine = create_engine(
+    settings.database_url,
+    connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+    pool_pre_ping=True,
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def init_db() -> None:
+    """Create all tables and runtime directories."""
     logger.info("Initializing database...")
-    
-    # Create directories
-    Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-    Path(settings.CACHE_DIR).mkdir(parents=True, exist_ok=True)
-    Path(settings.FAISS_INDEX_PATH).mkdir(parents=True, exist_ok=True)
-    Path("./logs").mkdir(parents=True, exist_ok=True)
-    
+    Base.metadata.create_all(bind=engine)
+
+    for d in [settings.upload_dir, settings.cache_dir, settings.faiss_index_path, "./logs"]:
+        Path(d).mkdir(parents=True, exist_ok=True)
+
     logger.info("Database initialized successfully")
+
+
+def get_db() -> Session:
+    """FastAPI dependency that yields a DB session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

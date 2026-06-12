@@ -1,0 +1,78 @@
+/* Exam Prep Bot — Stylesheet */
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f0f2f5;min-height:100vh;color:#333}
+
+.container{max-width:1400px;margin:0 auto;padding:20px}
+
+header{background:#fff;padding:20px;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+header h1{color:#4f6bed;font-size:28px}
+header .badge{background:#4f6bed;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;font-weight:bold}
+
+.main-content{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+.panel{background:#fff;border-radius:10px;padding:25px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.panel h2{color:#4f6bed;margin-bottom:16px;font-size:18px}
+
+.mt{margin-top:28px}
+
+/* Upload */
+.upload-area{border:3px dashed #4f6bed;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:background .2s}
+.upload-area:hover,.upload-area.dragover{background:#f0f4ff}
+#fileInput{display:none}
+.upload-icon{font-size:48px;margin-bottom:8px}
+.upload-text{color:#4f6bed;font-weight:bold;margin-bottom:4px}
+.upload-hint{color:#999;font-size:13px}
+
+/* Chat */
+.chat-container{display:flex;flex-direction:column;height:520px;gap:12px}
+.messages-box{flex:1;border:1px solid #e0e0e0;border-radius:8px;padding:14px;overflow-y:auto;background:#fafafa}
+.message{margin-bottom:14px;animation:slideIn .25s ease}
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.message.user{text-align:right}
+.message.user .message-content{background:#4f6bed;color:#fff;border-radius:14px 14px 0 14px}
+.message.assistant .message-content{background:#e8ecff;color:#333;border-radius:14px 14px 14px 0}
+.message-content{display:inline-block;padding:10px 14px;max-width:80%;word-wrap:break-word}
+.message-time{font-size:11px;color:#aaa;margin-top:4px}
+
+.input-area{display:flex;gap:10px}
+#queryInput{flex:1;padding:10px 14px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:inherit}
+#queryInput:focus{outline:none;border-color:#4f6bed;box-shadow:0 0 0 3px rgba(79,107,237,.12)}
+
+.btn{padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:all .2s;font-size:14px}
+.btn-primary{background:#4f6bed;color:#fff}
+.btn-primary:hover{background:#3d59d4}
+.btn-primary:disabled{background:#ccc;cursor:not-allowed}
+
+/* Response panel */
+.response-panel{margin-top:20px}
+.response-content{background:#fff;padding:20px;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:4px solid #4f6bed}
+.response-title{font-weight:bold;color:#4f6bed;margin-bottom:10px;font-size:16px}
+.response-text{line-height:1.6;margin-bottom:14px;color:#555}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.metric{background:#fafafa;padding:14px;border-radius:8px;text-align:center;border:1px solid #e0e0e0}
+.metric-value{font-size:22px;font-weight:bold;color:#4f6bed}
+.metric-label{font-size:12px;color:#999;margin-top:4px}
+
+.sources{background:#fafafa;padding:14px;border-radius:8px;border:1px solid #e0e0e0}
+.sources-title{font-weight:bold;margin-bottom:10px;color:#4f6bed}
+.source-item{padding:10px;margin:8px 0;background:#fff;border-left:3px solid #4f6bed;border-radius:4px}
+.source-page{font-weight:bold;color:#4f6bed;margin-bottom:4px}
+.source-quote{color:#666;font-style:italic;font-size:13px}
+
+/* Status */
+.status{padding:10px 14px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:14px}
+.status.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
+.status.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
+.status.info{background:#d1ecf1;color:#0c5460;border:1px solid #bee5eb}
+
+.about{color:#666;line-height:1.8;font-size:14px}
+.about ul{margin-left:20px;margin-top:8px}
+
+.spinner{border:3px solid #f3f3f3;border-top:3px solid #4f6bed;border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:0 auto 8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@media(max-width:768px){
+    .main-content{grid-template-columns:1fr}
+    header{flex-direction:column;text-align:center;gap:10px}
+    .metrics{grid-template-columns:repeat(2,1fr)}
+}
