@@ -63,19 +63,42 @@ class ExamPrepBot:
     # Question answering (full RAG pipeline)
     # ------------------------------------------------------------------
     def answer_question(self, query: str) -> AnswerWithSources:
-        logger.info(f"Processing query: {query}")
+        logger.info(f"[PIPELINE] ===== New query: {query!r} =====")
         start = time.time()
 
         try:
+            # Stage 1: Intent classification
+            t0 = time.time()
             intent_result = self.intent_classifier.classify(query)
             intent = intent_result.primary_intent
             intent_confidence = intent_result.confidence
+            logger.info(
+                f"[PIPELINE] Stage 1 — Intent: {intent.value}  confidence={intent_confidence:.3f}  "
+                f"method={intent_result.reasoning}  duration={time.time()-t0:.3f}s"
+            )
+            if intent_result.alternative_intents:
+                logger.debug(f"[PIPELINE] Alternative intents: {intent_result.alternative_intents}")
 
+            # Stage 2: Retrieval
+            t0 = time.time()
             retrieval_result = self.retriever.search(query, intent)
             chunks = retrieval_result["chunks"]
             is_relevant = retrieval_result["is_relevant"]
+            logger.info(
+                f"[PIPELINE] Stage 2 — Retrieval: chunks={len(chunks)}  "
+                f"relevance={retrieval_result['relevance_score']:.4f}  "
+                f"is_relevant={is_relevant}  in_scope={retrieval_result['in_scope']}  "
+                f"duration={time.time()-t0:.3f}s"
+            )
+            for i, c in enumerate(chunks[:3]):
+                logger.debug(
+                    f"[PIPELINE]   chunk[{i}]: page={c.metadata.page_number}  "
+                    f"score={c.relevance_score:.4f}  content={c.content[:80]!r}..."
+                )
 
             if not is_relevant:
+                duration = time.time() - start
+                logger.warning(f"[PIPELINE] Query out of scope — returning fallback  total_duration={duration:.3f}s")
                 return AnswerWithSources(
                     answer="I couldn't find relevant information about this topic in your uploaded materials. Could you rephrase your question or provide more context?",
                     query_intent=intent,
@@ -83,14 +106,23 @@ class ExamPrepBot:
                     sources=[],
                     overall_confidence=0.0,
                     hallucination_risk="high",
-                    response_time_seconds=time.time() - start,
+                    response_time_seconds=duration,
                     format_type="out_of_scope",
                 )
 
+            # Stage 3: LLM answer generation
+            t0 = time.time()
             structured = self.llm.generate_structured_answer(query, chunks, intent)
             answer_text = structured["answer"]
             claims = structured["claims"]
+            logger.info(
+                f"[PIPELINE] Stage 3 — LLM: answer_length={len(answer_text)}  "
+                f"claims={len(claims)}  format={structured.get('format_type')}  "
+                f"duration={time.time()-t0:.3f}s"
+            )
 
+            # Stage 4: Citation extraction & confidence scoring
+            t0 = time.time()
             citations = [
                 c
                 for claim in claims
@@ -102,6 +134,11 @@ class ExamPrepBot:
             )
             hallucination_risk = self.confidence_scorer.assess_hallucination_risk(
                 chunks, citations, len(claims)
+            )
+            logger.info(
+                f"[PIPELINE] Stage 4 — Validation: citations={len(citations)}/{len(claims)}  "
+                f"confidence={overall_confidence:.3f}  hallucination_risk={hallucination_risk}  "
+                f"duration={time.time()-t0:.3f}s"
             )
 
             response_time = time.time() - start
@@ -119,10 +156,14 @@ class ExamPrepBot:
             now = datetime.now().isoformat()
             self.chat_history.append(ChatMessage(role="user", content=query, timestamp=now, intent_type=intent))
             self.chat_history.append(ChatMessage(role="assistant", content=answer_text, timestamp=now, intent_type=intent))
+
+            logger.info(f"[PIPELINE] ===== Query complete: total_duration={response_time:.3f}s =====")
             return result
 
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            duration = time.time() - start
+            logger.error(f"[PIPELINE] ===== Query FAILED: error={type(e).__name__}: {e}  duration={duration:.3f}s =====")
+            logger.exception("[PIPELINE] Full traceback:")
             return AnswerWithSources(
                 answer=f"An error occurred: {e}",
                 query_intent=QueryType.VAGUE,
@@ -130,7 +171,7 @@ class ExamPrepBot:
                 sources=[],
                 overall_confidence=0.0,
                 hallucination_risk="high",
-                response_time_seconds=time.time() - start,
+                response_time_seconds=duration,
                 format_type="error",
             )
 

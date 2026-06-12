@@ -138,10 +138,20 @@ class IntentClassifier:
             self.template_embeddings[intent] = np.mean(embeddings, axis=0)
 
     def classify(self, query: str) -> IntentClassificationResult:
+        logger.debug(f"[INTENT] Classifying: {query!r}  threshold={self.threshold}")
         rule_result = self._classify_by_rules(query)
         if rule_result and rule_result["confidence"] > self.threshold:
+            logger.info(
+                f"[INTENT] Rule match: intent={rule_result['intent'].value}  "
+                f"confidence={rule_result['confidence']:.3f}"
+            )
             return self._create_result(query, rule_result)
         semantic_result = self._classify_by_semantics(query)
+        logger.info(
+            f"[INTENT] Semantic match: intent={semantic_result['intent'].value}  "
+            f"confidence={semantic_result['confidence']:.3f}"
+        )
+        logger.debug(f"[INTENT] All scores: { {k.value: f'{v:.3f}' for k, v in semantic_result['all_scores'].items()} }")
         return self._create_result(query, semantic_result)
 
     def _classify_by_rules(self, query: str) -> Optional[Dict]:

@@ -27,20 +27,24 @@ class DocumentParser:
         raise ValueError(f"Unsupported file type: {file_type}")
 
     def _parse_pdf(self, file_path: str) -> Document:
-        logger.info(f"Parsing PDF: {file_path}")
+        logger.info(f"[PARSER] Parsing PDF: {file_path}")
         file_size_bytes = Path(file_path).stat().st_size
         file_name = Path(file_path).name
 
         with pdfplumber.open(file_path) as pdf:
+            logger.info(f"[PARSER] PDF opened: pages={len(pdf.pages)}  size={file_size_bytes/1024:.1f} KB")
             full_text = ""
             for page_num, page in enumerate(pdf.pages, 1):
                 text = page.extract_text() or ""
+                logger.debug(f"[PARSER] Page {page_num}: {len(text)} chars extracted")
                 if full_text:
                     full_text += f"\n\n--- Page {page_num} ---\n\n"
                 full_text += text
 
+            logger.info(f"[PARSER] Total text extracted: {len(full_text)} chars")
             chunks = self._create_chunks(full_text, file_name, len(pdf.pages))
 
+        logger.info(f"[PARSER] PDF parsed: {file_name}  chunks={len(chunks)}")
         return Document(
             file_name=file_name,
             file_type="pdf",
@@ -51,7 +55,7 @@ class DocumentParser:
         )
 
     def _parse_docx(self, file_path: str) -> Document:
-        logger.info(f"Parsing DOCX: {file_path}")
+        logger.info(f"[PARSER] Parsing DOCX: {file_path}")
         file_size_bytes = Path(file_path).stat().st_size
         file_name = Path(file_path).name
 
@@ -62,8 +66,10 @@ class DocumentParser:
             if text:
                 full_text += text + "\n"
 
+        logger.info(f"[PARSER] DOCX text extracted: {len(full_text)} chars  paragraphs={len(doc.paragraphs)}")
         chunks = self._create_chunks(full_text, file_name, len(doc.paragraphs))
 
+        logger.info(f"[PARSER] DOCX parsed: {file_name}  chunks={len(chunks)}")
         return Document(
             file_name=file_name,
             file_type="docx",

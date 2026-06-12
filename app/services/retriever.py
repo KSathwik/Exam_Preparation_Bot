@@ -33,6 +33,7 @@ class AdaptiveRetriever:
 
         raw_results = self.vector_store.search(query, top_k=top_k * 2)
         if not raw_results:
+            logger.debug(f"No raw results for query: {query!r}")
             return [], False
 
         chunks = []
@@ -47,7 +48,13 @@ class AdaptiveRetriever:
                 )
             )
 
-        in_scope = bool(chunks) and chunks[0].relevance_score >= self.relevance_threshold
+        best = chunks[0].relevance_score if chunks else 0.0
+        logger.info(
+            f"Retrieval: query={query!r}  best_score={best:.4f}  "
+            f"threshold={self.relevance_threshold}  in_scope={best >= self.relevance_threshold}  "
+            f"n_chunks={len(chunks)}"
+        )
+        in_scope = bool(chunks) and best >= self.relevance_threshold
         return chunks, in_scope
 
     @staticmethod

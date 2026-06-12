@@ -26,9 +26,16 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     api_prefix: str = "/api/v1"
 
-    # Anthropic
-    anthropic_api_key: str
-    model_name: str = "claude-3-5-sonnet-20241022"
+    # LLM Provider: "gemini", "openai", or "anthropic"
+    llm_provider: str = "gemini"
+
+    # API Keys (only the one matching llm_provider is required)
+    gemini_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+    # Model defaults per provider (overridden by model_name if set)
+    model_name: Optional[str] = None
     max_tokens: int = 1024
     temperature: float = 0.3
     top_p: float = 0.95
@@ -52,8 +59,8 @@ class Settings(BaseSettings):
 
     # Retrieval
     retrieval_top_k: int = 5
-    relevance_threshold: float = 0.5
-    min_relevance_score: float = 0.3
+    relevance_threshold: float = 0.2
+    min_relevance_score: float = 0.1
 
     # Intent Classification
     intent_classification_threshold: float = 0.7

@@ -23,7 +23,10 @@ class EmbeddingGenerator:
             self.model = SentenceTransformer(settings.embedding_model)
 
         self.model_name = settings.embedding_model
-        self.embedding_dim = self.model.get_sentence_embedding_dimension()
+        if hasattr(self.model, "get_embedding_dimension"):
+            self.embedding_dim = self.model.get_embedding_dimension()
+        else:
+            self.embedding_dim = self.model.get_sentence_embedding_dimension()
 
     def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:
         batch_size = batch_size or settings.batch_size
@@ -60,6 +63,7 @@ class FAISSVectorStore:
         embeddings_file = Path(self.index_path) / "embeddings.npy"
 
         if not index_file.exists():
+            logger.info(f"[FAISS] No existing index at {index_file} — will create new")
             return False
         try:
             self.index = faiss.read_index(str(index_file))
@@ -68,9 +72,10 @@ class FAISSVectorStore:
                     self.chunk_metadata = pickle.load(f)
             if embeddings_file.exists():
                 self.embeddings = np.load(embeddings_file)
+            logger.info(f"[FAISS] Loaded index: vectors={self.index.ntotal}  metadata={len(self.chunk_metadata)}  path={self.index_path}")
             return True
         except Exception as e:
-            logger.error(f"Error loading index: {e}")
+            logger.error(f"[FAISS] Failed to load index: {type(e).__name__}: {e}")
             return False
 
     def save_index(self) -> None:
@@ -85,6 +90,7 @@ class FAISSVectorStore:
             pickle.dump(self.chunk_metadata, f)
         if self.embeddings is not None:
             np.save(embeddings_file, self.embeddings)
+        logger.debug(f"[FAISS] Index saved: vectors={self.index.ntotal}  path={self.index_path}")
 
     def add_embeddings(self, embeddings: np.ndarray, metadata_list: List[dict]) -> None:
         if self.index is None:
@@ -128,8 +134,10 @@ class VectorStoreManager:
             self.vector_store.create_index()
 
     def add_document(self, document: Document) -> None:
+        logger.info(f"[EMBED] Adding document: {document.file_name}  chunks={document.total_chunks}")
         texts = [chunk.content for chunk in document.chunks]
         embeddings = self.embedding_gen.encode(texts)
+        logger.debug(f"[EMBED] Encoded {len(texts)} chunks → shape={embeddings.shape}")
         metadata_list = [
             {
                 "content": chunk.content,
@@ -141,17 +149,23 @@ class VectorStoreManager:
         ]
         self.vector_store.add_embeddings(embeddings, metadata_list)
         self.vector_store.save_index()
+        logger.info(f"[EMBED] Document indexed: total_vectors={self.vector_store.get_size()}")
 
     def search(self, query: str, top_k: int = None) -> List[Tuple[dict, float, int]]:
         top_k = top_k or settings.retrieval_top_k
+        logger.debug(f"[SEARCH] query={query!r}  top_k={top_k}  index_size={self.vector_store.get_size()}")
         query_embedding = self.embedding_gen.encode_single(query)
         distances, indices = self.vector_store.search(query_embedding, top_k)
+        logger.debug(f"[SEARCH] FAISS returned {len(distances)} results  distances={[f'{d:.4f}' for d in distances[:5]]}")
         results = []
         for rank, (distance, idx) in enumerate(zip(distances, indices)):
             chunk_info = self.vector_store.get_chunk_by_index(idx)
             if chunk_info:
-                similarity = 1 / (1 + distance)
+                similarity = max(0.0, 1.0 - (distance / 2.0))
+                logger.debug(f"[SEARCH] result #{rank+1}: distance={distance:.4f}  similarity={similarity:.4f}  idx={idx}  file={chunk_info.get('file_name','?')}")
                 results.append((chunk_info, similarity, rank + 1))
+        best_sim = f"{results[0][1]:.4f}" if results else "0.0"
+        logger.info(f"[SEARCH] Returning {len(results)} results  best_sim={best_sim}")
         return results
 
     def get_stats(self) -> dict:

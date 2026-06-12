@@ -3,27 +3,55 @@ Exam Prep Bot — FastAPI Backend
 Unified application entry point.
 """
 
-from fastapi import FastAPI
+import sys
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from loguru import logger
 from pathlib import Path
+import time
 
 from app.api import documents, queries, health
 from app.core.config import settings
 from app.core.database import init_db
 
+# ── Loguru configuration ──────────────────────────────────────────────
+logger.remove()
+logger.add(
+    sys.stderr,
+    level=settings.log_level,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:<8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+)
+logger.add(
+    settings.log_file,
+    level="DEBUG",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
+    rotation="10 MB",
+    retention="7 days",
+    compression="zip",
+    enqueue=True,
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("=" * 60)
     logger.info("Starting Exam Prep Bot...")
+    logger.info(f"LLM Provider : {settings.llm_provider}")
+    logger.info(f"Model Name   : {settings.model_name or '(provider default)'}")
+    logger.info(f"Embedding    : {settings.embedding_model}")
+    logger.info(f"Database URL : {settings.database_url}")
+    logger.info(f"Log Level    : {settings.log_level}")
+    logger.info(f"Debug Mode   : {settings.debug_mode}")
+    logger.info("=" * 60)
+
     init_db()
 
     from app.core.dependencies import get_bot
     get_bot()
-    logger.info("Bot initialized successfully")
+    logger.info("Bot initialized successfully — ready to serve requests")
 
     yield
 
@@ -45,6 +73,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    logger.info(f"→ {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        duration = time.time() - start
+        logger.info(f"← {request.method} {request.url.path}  status={response.status_code}  duration={duration:.3f}s")
+        return response
+    except Exception as e:
+        duration = time.time() - start
+        logger.error(f"✗ {request.method} {request.url.path}  error={e}  duration={duration:.3f}s")
+        raise
+
 
 # Routers
 app.include_router(health.router, tags=["Health"])
@@ -74,7 +118,8 @@ async def reset_system():
 @app.get("/api/system/config", tags=["System"])
 async def get_system_config():
     return {
-        "model": settings.model_name,
+        "llm_provider": settings.llm_provider,
+        "model": settings.model_name or "(provider default)",
         "embedding_model": settings.embedding_model,
         "max_chunk_size": settings.max_chunk_size,
         "retrieval_top_k": settings.retrieval_top_k,

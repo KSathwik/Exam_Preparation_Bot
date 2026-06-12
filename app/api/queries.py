@@ -40,12 +40,19 @@ def _build_response(request: QueryRequest, answer_with_sources) -> QueryResponse
 
 @router.post("/ask", response_model=QueryResponse)
 async def ask_question(request: QueryRequest):
+    logger.info(f"[API /ask] query={request.query!r}  document_id={request.document_id}  session_id={request.session_id}")
     bot = get_bot()
     try:
         answer = bot.answer_question(request.query)
-        return _build_response(request, answer)
+        response = _build_response(request, answer)
+        logger.info(
+            f"[API /ask] OK: intent={response.query_intent}  confidence={response.overall_confidence:.3f}  "
+            f"risk={response.hallucination_risk}  sources={len(response.sources)}  time={response.response_time_seconds:.3f}s"
+        )
+        return response
     except Exception as e:
-        logger.error(f"Error processing query: {e}")
+        logger.error(f"[API /ask] FAILED: query={request.query!r}  error={type(e).__name__}: {e}")
+        logger.exception("[API /ask] Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -57,9 +64,11 @@ async def query_compat(request: QueryRequest):
 
 @router.get("/intent/{query}")
 async def classify_intent(query: str):
+    logger.info(f"[API /intent] query={query!r}")
     classifier = get_intent_classifier()
     try:
         result = classifier.classify(query)
+        logger.info(f"[API /intent] OK: intent={result.primary_intent.value}  confidence={result.confidence:.3f}")
         return {
             "query": query,
             "primary_intent": result.primary_intent.value,
@@ -68,6 +77,7 @@ async def classify_intent(query: str):
             "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:
+        logger.error(f"[API /intent] FAILED: query={query!r}  error={type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
