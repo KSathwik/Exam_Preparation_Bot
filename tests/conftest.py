@@ -8,6 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+# Must be set explicitly: settings.llm_provider defaults to "gemini" (see
+# app/core/config.py), and unlike local dev there is no .env file in CI to
+# override it — without this, every test that builds the app (get_bot())
+# tries to construct a real Gemini client with no GEMINI_API_KEY and fails
+# at startup, not at the assertion.
+os.environ.setdefault("LLM_PROVIDER", "anthropic")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key-for-tests")
 os.environ.setdefault("APP_API_KEY", "test-api-key-for-tests")
 

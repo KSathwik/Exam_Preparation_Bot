@@ -3,7 +3,7 @@
 import time as _time
 import uuid
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -50,10 +50,18 @@ async def _read_upload_within_limit(file: UploadFile) -> bytes:
 
 def _safe_upload_path(raw_filename: str | None, document_id: str) -> Path:
     """Collapse the client-supplied filename to its bare basename so it cannot
-    escape the upload directory via path traversal (e.g. ``../../evil.pdf`` or
-    an absolute path). The extension is still whatever the client sent —
-    callers must validate it separately."""
-    basename = Path(raw_filename or "upload").name
+    escape the upload directory via path traversal (e.g. ``../../evil.pdf``,
+    a Windows-style ``..\\..\\evil.pdf``, or an absolute path). The extension
+    is still whatever the client sent — callers must validate it separately.
+
+    Both separator styles are stripped explicitly via ``PurePosixPath`` rather
+    than the OS-dependent ``Path`` — plain ``Path(...).name`` only treats
+    backslash as a separator on Windows, so a Windows-style traversal string
+    passes through completely intact when the server runs on Linux (e.g. the
+    Docker deployment), regardless of what OS the request originated from.
+    """
+    normalized = (raw_filename or "upload").replace("\\", "/")
+    basename = PurePosixPath(normalized).name
     if not basename or basename in {".", ".."}:
         basename = "upload"
     return Path(settings.upload_dir) / f"{document_id}_{basename}"
