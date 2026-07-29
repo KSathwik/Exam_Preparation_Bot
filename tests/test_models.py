@@ -1,16 +1,17 @@
 """Tests for domain models and schemas."""
 
 import pytest
+
 from app.services.models import (
-    QueryType,
-    ChunkMetadata,
-    DocumentChunk,
-    Document,
-    RetrievedChunk,
-    IntentClassificationResult,
-    SourceCitation,
     AnswerWithSources,
     ChatMessage,
+    ChunkMetadata,
+    Document,
+    DocumentChunk,
+    IntentClassificationResult,
+    QueryType,
+    RetrievedChunk,
+    SourceCitation,
 )
 
 
@@ -52,9 +53,7 @@ def test_intent_classification_result():
 
 
 def test_source_citation():
-    sc = SourceCitation(
-        page_number=3, quoted_text="some text", confidence=0.85, relevance_score=0.7
-    )
+    sc = SourceCitation(page_number=3, quoted_text="some text", confidence=0.85, relevance_score=0.7)
     assert sc.page_number == 3
 
 

@@ -1,14 +1,18 @@
 """Query processing API endpoints."""
 
-from fastapi import APIRouter, HTTPException, WebSocket, status
-from loguru import logger
+import asyncio
 import json
-import time
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
-from app.models.schemas import QueryRequest, QueryResponse, SourceCitationOut
-from app.core.dependencies import get_bot, get_intent_classifier
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from fastapi.concurrency import run_in_threadpool
+from loguru import logger
+
+from app.core.dependencies import get_bot, get_intent_classifier, get_vector_store_manager
+from app.core.rate_limit import limit_expensive
+from app.core.security import require_api_key, require_api_key_ws
+from app.models.schemas import BatchQueryRequest, QueryRequest, QueryResponse, SourceCitationOut
 
 router = APIRouter()
 
@@ -38,37 +42,47 @@ def _build_response(request: QueryRequest, answer_with_sources) -> QueryResponse
     )
 
 
-@router.post("/ask", response_model=QueryResponse)
-async def ask_question(request: QueryRequest):
-    logger.info(f"[API /ask] query={request.query!r}  document_id={request.document_id}  session_id={request.session_id}")
+async def _answer_query(payload: QueryRequest) -> QueryResponse:
+    logger.info(
+        f"[API /ask] query={payload.query!r}  document_id={payload.document_id}  session_id={payload.session_id}"
+    )
     bot = get_bot()
     try:
-        answer = bot.answer_question(request.query)
-        response = _build_response(request, answer)
+        answer = await run_in_threadpool(bot.answer_question, payload.query)
+        response = _build_response(payload, answer)
         logger.info(
             f"[API /ask] OK: intent={response.query_intent}  confidence={response.overall_confidence:.3f}  "
             f"risk={response.hallucination_risk}  sources={len(response.sources)}  time={response.response_time_seconds:.3f}s"
         )
         return response
     except Exception as e:
-        logger.error(f"[API /ask] FAILED: query={request.query!r}  error={type(e).__name__}: {e}")
+        logger.error(f"[API /ask] FAILED: query={payload.query!r}  error={type(e).__name__}: {e}")
         logger.exception("[API /ask] Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query_compat(request: QueryRequest):
+@router.post("/ask", response_model=QueryResponse, dependencies=[Depends(require_api_key)])
+@limit_expensive()
+async def ask_question(request: Request, payload: QueryRequest):
+    return await _answer_query(payload)
+
+
+@router.post("/query", response_model=QueryResponse, dependencies=[Depends(require_api_key)])
+@limit_expensive()
+async def query_compat(request: Request, payload: QueryRequest):
     """Backward-compatible endpoint matching the original /api/query."""
-    return await ask_question(request)
+    return await _answer_query(payload)
 
 
-@router.get("/intent/{query}")
+@router.get("/intent/{query}", dependencies=[Depends(require_api_key)])
 async def classify_intent(query: str):
     logger.info(f"[API /intent] query={query!r}")
     classifier = get_intent_classifier()
     try:
-        result = classifier.classify(query)
-        logger.info(f"[API /intent] OK: intent={result.primary_intent.value}  confidence={result.confidence:.3f}")
+        result = await run_in_threadpool(classifier.classify, query)
+        logger.info(
+            f"[API /intent] OK: intent={result.primary_intent.value}  confidence={result.confidence:.3f}"
+        )
         return {
             "query": query,
             "primary_intent": result.primary_intent.value,
@@ -81,27 +95,28 @@ async def classify_intent(query: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/batch")
-async def batch_queries(queries: list[str]):
-    if len(queries) > 50:
-        raise HTTPException(status_code=400, detail="Maximum 50 queries per batch")
+@router.post("/batch", dependencies=[Depends(require_api_key)])
+@limit_expensive()
+async def batch_queries(request: Request, payload: BatchQueryRequest):
     bot = get_bot()
     results = []
-    for q in queries:
+    for q in payload.queries:
         try:
-            a = bot.answer_question(q)
-            results.append({"query": q, "success": True, "answer": a.answer, "confidence": a.overall_confidence})
+            a = await run_in_threadpool(bot.answer_question, q)
+            results.append(
+                {"query": q, "success": True, "answer": a.answer, "confidence": a.overall_confidence}
+            )
         except Exception as e:
             results.append({"query": q, "success": False, "error": str(e)})
     return {
-        "total": len(queries),
+        "total": len(payload.queries),
         "successful": sum(1 for r in results if r.get("success")),
         "failed": sum(1 for r in results if not r.get("success")),
         "results": results,
     }
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_api_key)])
 async def get_chat_history():
     bot = get_bot()
     return {
@@ -118,23 +133,22 @@ async def get_chat_history():
     }
 
 
-@router.delete("/history")
+@router.delete("/history", dependencies=[Depends(require_api_key)])
 async def clear_chat_history():
     bot = get_bot()
     bot.chat_history.clear()
     return {"status": "success", "message": "Chat history cleared"}
 
 
-@router.post("/search")
+@router.post("/search", dependencies=[Depends(require_api_key)])
 async def search_documents(query: str, top_k: Optional[int] = None):
     classifier = get_intent_classifier()
-    intent_result = classifier.classify(query)
+    intent_result = await run_in_threadpool(classifier.classify, query)
 
     from app.services.retriever import HybridRetriever
-    from app.core.dependencies import get_vector_store_manager
 
     retriever = HybridRetriever(get_vector_store_manager())
-    result = retriever.search(query, intent_result.primary_intent, top_k)
+    result = await run_in_threadpool(retriever.search, query, intent_result.primary_intent, top_k)
     return {
         "success": True,
         "query": query,
@@ -150,10 +164,17 @@ async def search_documents(query: str, top_k: Optional[int] = None):
 
 
 # ── WebSocket streaming ──────────────────────────────────────────────
+# Browsers cannot set custom headers on a WebSocket handshake, so auth here
+# uses a ?api_key= query parameter instead of the X-API-Key header used by
+# the REST endpoints above (see app.core.security.require_api_key_ws).
+
 
 @router.websocket("/ws")
 async def websocket_query(websocket: WebSocket):
     await websocket.accept()
+    if not await require_api_key_ws(websocket):
+        return
+
     bot = get_bot()
     try:
         while True:
@@ -165,31 +186,77 @@ async def websocket_query(websocket: WebSocket):
                 continue
 
             try:
-                intent_result = bot.intent_classifier.classify(query)
-                await websocket.send_json({
-                    "type": "intent",
-                    "intent": intent_result.primary_intent.value,
-                    "confidence": intent_result.confidence,
-                })
+                intent_result = await run_in_threadpool(bot.intent_classifier.classify, query)
+                await websocket.send_json(
+                    {
+                        "type": "intent",
+                        "intent": intent_result.primary_intent.value,
+                        "confidence": intent_result.confidence,
+                    }
+                )
             except Exception:
                 pass
 
             try:
-                answer = bot.answer_question(query)
-                chunk_size = 50
-                for i in range(0, len(answer.answer), chunk_size):
-                    await websocket.send_json({"type": "chunk", "text": answer.answer[i : i + chunk_size]})
-                await websocket.send_json({
-                    "type": "complete",
-                    "answer": answer.answer,
-                    "sources": [
-                        {"page": s.page_number, "section": s.section_title, "quote": s.quoted_text}
-                        for s in answer.sources
-                    ],
-                    "confidence": answer.overall_confidence,
-                    "hallucination_risk": answer.hallucination_risk,
-                    "response_time": answer.response_time_seconds,
-                })
+                # bot.answer_question runs in a worker thread (see
+                # run_in_threadpool below); on_stage fires from that thread,
+                # so events are bridged onto the event loop via
+                # call_soon_threadsafe into a queue and sent by a concurrent
+                # drain task, keeping stage/draft/final events in order and
+                # fully flushed before "complete" is sent.
+                loop = asyncio.get_running_loop()
+                stage_queue: asyncio.Queue = asyncio.Queue()
+
+                def on_stage(stage: str, payload: dict) -> None:
+                    loop.call_soon_threadsafe(stage_queue.put_nowait, (stage, payload))
+
+                async def _send_chunks(text: str, stage_label: str, chunk_size: int = 50) -> None:
+                    for i in range(0, len(text), chunk_size):
+                        await websocket.send_json(
+                            {"type": "chunk", "text": text[i : i + chunk_size], "stage": stage_label}
+                        )
+
+                async def _drain_stage_queue() -> None:
+                    while True:
+                        item = await stage_queue.get()
+                        if item is None:
+                            return
+                        stage, payload = item
+                        if stage == "reflecting":
+                            await websocket.send_json(
+                                {
+                                    "type": "status",
+                                    "stage": "reflecting",
+                                    "message": payload.get("message", ""),
+                                }
+                            )
+                        elif stage == "draft_ready":
+                            await _send_chunks(payload.get("answer", ""), "draft")
+                        elif stage == "final_ready":
+                            await _send_chunks(payload.get("answer", ""), "final")
+
+                drain_task = asyncio.create_task(_drain_stage_queue())
+                try:
+                    answer = await run_in_threadpool(bot.answer_question, query, on_stage)
+                finally:
+                    await stage_queue.put(None)
+                    await drain_task
+
+                await websocket.send_json(
+                    {
+                        "type": "complete",
+                        "answer": answer.answer,
+                        "query_intent": answer.query_intent.value,
+                        "format_type": answer.format_type,
+                        "sources": [
+                            {"page": s.page_number, "section": s.section_title, "quote": s.quoted_text}
+                            for s in answer.sources
+                        ],
+                        "confidence": answer.overall_confidence,
+                        "hallucination_risk": answer.hallucination_risk,
+                        "response_time": answer.response_time_seconds,
+                    }
+                )
             except Exception as e:
                 await websocket.send_json({"type": "error", "message": str(e)})
     except Exception:

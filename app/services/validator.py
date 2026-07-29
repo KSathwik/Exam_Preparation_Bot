@@ -1,10 +1,14 @@
 """Span extraction, confidence scoring, and citation formatting."""
 
-from typing import List, Tuple, Optional
-from difflib import SequenceMatcher
-from loguru import logger
-from .models import RetrievedChunk, SourceCitation
 import re
+from difflib import SequenceMatcher
+from typing import List, Optional, Tuple, Union
+
+from loguru import logger
+
+from .models import RetrievedChunk, SourceCitation
+
+_SPAN_WINDOW_SIZES = (1, 2, 3)
 
 
 class SpanExtractor:
@@ -14,13 +18,14 @@ class SpanExtractor:
         self.min_similarity = min_similarity
 
     def extract_supporting_span(
-        self, claim: str, chunks: List[RetrievedChunk]
+        self, claim: Union[str, dict], chunks: List[RetrievedChunk]
     ) -> Optional[SourceCitation]:
+        claim_text, candidate_chunks = self._resolve_claim(claim, chunks)
         best_match = None
         best_sim = 0.0
 
-        for chunk in chunks:
-            span, sim = self._find_span_in_text(claim, chunk.content)
+        for chunk in candidate_chunks:
+            span, sim = self._find_span_in_text(claim_text, chunk.content)
             if sim > best_sim:
                 best_sim = sim
                 best_match = (chunk, span, sim)
@@ -36,18 +41,32 @@ class SpanExtractor:
             )
         return None
 
+    @staticmethod
+    def _resolve_claim(
+        claim: Union[str, dict], chunks: List[RetrievedChunk]
+    ) -> Tuple[str, List[RetrievedChunk]]:
+        """Accept either a plain claim string (legacy shape) or the
+        chunk-indexed dict produced by ``_BaseLLM.extract_claims``
+        (``{"claim": str, "chunks": [1, 3]}``, 1-based indices matching the
+        ``[1]``/``[3]`` labels in ``_format_context``). When indices are
+        present, narrow the search to those chunks instead of fuzzy-matching
+        blindly across every retrieved chunk."""
+        if isinstance(claim, dict):
+            text = claim.get("claim", "")
+            indices = claim.get("chunks") or []
+            narrowed = [chunks[i - 1] for i in indices if isinstance(i, int) and 0 < i <= len(chunks)]
+            return text, (narrowed or chunks)
+        return claim, chunks
+
     def _find_span_in_text(self, claim: str, text: str) -> Tuple[str, float]:
         sentences = _split_sentences(text)
         best_span, best_ratio = "", 0.0
 
-        for sentence in sentences:
-            ratio = _similarity(claim, sentence)
-            if ratio > best_ratio:
-                best_ratio, best_span = ratio, sentence
-
-        if len(sentences) > 1:
-            for i in range(len(sentences) - 1):
-                combined = sentences[i] + " " + sentences[i + 1]
+        # Try windows of 1, 2, and 3 consecutive sentences — a claim often
+        # paraphrases a short run of sentences rather than exactly one.
+        for window_size in _SPAN_WINDOW_SIZES:
+            for i in range(len(sentences) - window_size + 1):
+                combined = " ".join(sentences[i : i + window_size])
                 ratio = _similarity(claim, combined)
                 if ratio > best_ratio:
                     best_ratio, best_span = ratio, combined

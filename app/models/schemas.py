@@ -1,23 +1,18 @@
-"""Pydantic schemas for FastAPI request/response models."""
+"""Pydantic schemas for FastAPI request/response models.
 
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from enum import Enum
+Note: query intent is represented here as a plain ``str`` (see
+``QueryResponse.query_intent``), not a duplicate enum — the single source of
+truth for intent types is ``app.services.models.QueryType``, used throughout
+the pipeline. Keeping only one definition avoids the two drifting apart.
+"""
+
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-
-class QueryType(str, Enum):
-    DEFINITION = "definition"
-    EXPLAIN = "explain"
-    COMPARE = "compare"
-    PROCESS = "process"
-    VAGUE = "vague"
-    EXAMPLE = "example"
-    DIAGRAM = "diagram"
-    HOMEWORK = "homework"
-
+from pydantic import BaseModel, Field, field_validator
 
 # ── Documents ────────────────────────────────────────────────────────
+
 
 class DocumentUploadResponse(BaseModel):
     success: bool
@@ -46,6 +41,7 @@ class DocumentListResponse(BaseModel):
 
 
 # ── Queries ──────────────────────────────────────────────────────────
+
 
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
@@ -78,6 +74,7 @@ class QueryResponse(BaseModel):
 
 # ── Chat ─────────────────────────────────────────────────────────────
 
+
 class ChatMessageOut(BaseModel):
     role: str
     content: str
@@ -86,6 +83,21 @@ class ChatMessageOut(BaseModel):
 
 
 # ── Batch ────────────────────────────────────────────────────────────
+
+
+class BatchQueryRequest(BaseModel):
+    queries: List[str] = Field(..., min_length=1, max_length=50)
+
+    @field_validator("queries")
+    @classmethod
+    def _validate_each_query(cls, queries: List[str]) -> List[str]:
+        for q in queries:
+            if not q or not q.strip():
+                raise ValueError("Batch queries cannot be empty")
+            if len(q) > 1000:
+                raise ValueError("Each query must be 1000 characters or fewer")
+        return queries
+
 
 class BatchQueryResult(BaseModel):
     query: str
@@ -103,6 +115,7 @@ class BatchQueryResponse(BaseModel):
 
 
 # ── System / Health ──────────────────────────────────────────────────
+
 
 class HealthResponse(BaseModel):
     status: str

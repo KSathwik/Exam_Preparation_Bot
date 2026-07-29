@@ -1,10 +1,13 @@
 """Health, readiness, and version endpoints."""
 
 from collections import deque
-from fastapi import APIRouter
-from fastapi.responses import PlainTextResponse
 from pathlib import Path
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
+
 from app.core.config import settings
+from app.core.security import require_api_key
 
 router = APIRouter()
 
@@ -21,7 +24,7 @@ async def health_check():
 @router.get("/ready")
 async def readiness_check():
     try:
-        from app.core.dependencies import get_vector_store_manager, get_intent_classifier
+        from app.core.dependencies import get_intent_classifier, get_vector_store_manager
 
         stats = get_vector_store_manager().get_stats()
         get_intent_classifier()
@@ -58,12 +61,17 @@ async def get_public_config():
     }
 
 
-@router.get("/logs/tail", response_class=PlainTextResponse)
+@router.get("/logs/tail", response_class=PlainTextResponse, dependencies=[Depends(require_api_key)])
 async def tail_logs(lines: int = 100):
-    """Return the last N lines of the log file for quick debugging."""
+    """Return the last N lines of the log file for quick debugging.
+
+    Requires an API key — the log file can contain internal paths, stack
+    traces, and other operational detail that shouldn't be publicly readable.
+    """
     log_path = Path(settings.log_file)
     if not log_path.exists():
         return "Log file not found"
+    capped_lines = max(1, min(lines, 5000))
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-        tail = deque(f, maxlen=lines)
+        tail = deque(f, maxlen=capped_lines)
     return "".join(tail)

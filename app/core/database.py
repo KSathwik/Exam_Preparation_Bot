@@ -1,9 +1,10 @@
 """Database initialization and session management."""
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from loguru import logger
 from pathlib import Path
+
+from loguru import logger
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.models.db_models import Base

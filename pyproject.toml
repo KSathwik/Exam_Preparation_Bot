@@ -1,0 +1,24 @@
+[tool.black]
+line-length = 110
+target-version = ["py310", "py311", "py312", "py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 110
+known_first_party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# The codebase isn't fully type-annotated yet — start non-strict and tighten
+# incrementally rather than requiring a big-bang annotation pass up front.
+disallow_untyped_defs = false
+check_untyped_defs = true

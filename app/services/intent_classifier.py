@@ -1,12 +1,15 @@
 """Query intent classification module."""
 
 from typing import Dict, Optional
-from .models import QueryType, IntentClassificationResult
+
+import numpy as np
+from loguru import logger
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from loguru import logger
-import numpy as np
+
 from app.core.config import settings
+
+from .models import IntentClassificationResult, QueryType
 
 
 class IntentClassifier:
@@ -151,17 +154,23 @@ class IntentClassifier:
             f"[INTENT] Semantic match: intent={semantic_result['intent'].value}  "
             f"confidence={semantic_result['confidence']:.3f}"
         )
-        logger.debug(f"[INTENT] All scores: { {k.value: f'{v:.3f}' for k, v in semantic_result['all_scores'].items()} }")
+        logger.debug(
+            f"[INTENT] All scores: { {k.value: f'{v:.3f}' for k, v in semantic_result['all_scores'].items()} }"
+        )
         return self._create_result(query, semantic_result)
 
     def _classify_by_rules(self, query: str) -> Optional[Dict]:
         query_lower = query.lower()
         intent_scores = {}
+        has_match = False
         for intent, keywords in self.INTENT_KEYWORDS.items():
             matches = sum(1 for kw in keywords if kw in query_lower)
             if matches > 0:
-                intent_scores[intent] = matches / len(keywords)
-        if not intent_scores:
+                intent_scores[intent] = 0.8 + 0.15 * (matches / len(keywords))
+                has_match = True
+            else:
+                intent_scores[intent] = 0.0
+        if not has_match:
             return None
         best_intent = max(intent_scores, key=intent_scores.get)
         return {
@@ -175,9 +184,7 @@ class IntentClassifier:
         query_embedding = self.model.encode(query, convert_to_numpy=True)
         intent_scores = {}
         for intent, tmpl_emb in self.template_embeddings.items():
-            sim = cosine_similarity(
-                query_embedding.reshape(1, -1), tmpl_emb.reshape(1, -1)
-            )[0][0]
+            sim = cosine_similarity(query_embedding.reshape(1, -1), tmpl_emb.reshape(1, -1))[0][0]
             intent_scores[intent] = float(sim)
         best_intent = max(intent_scores, key=intent_scores.get)
         return {

@@ -1,11 +1,26 @@
 """Shared fixtures for the test suite."""
 
 import os
-import pytest
+import tempfile
 from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key-for-tests")
+os.environ.setdefault("APP_API_KEY", "test-api-key-for-tests")
+
+# Tests must never read from or write to the real project data directories —
+# a shared on-disk FAISS index/upload folder across test runs (and across
+# concurrent pytest invocations) is exactly how index.faiss/metadata.pkl/
+# embeddings.npy end up desynced. Point everything at a fresh temp dir.
+_TEST_DATA_ROOT = tempfile.mkdtemp(prefix="exam_prep_bot_tests_")
+os.environ.setdefault("FAISS_INDEX_PATH", os.path.join(_TEST_DATA_ROOT, "faiss_index"))
+os.environ.setdefault("UPLOAD_DIR", os.path.join(_TEST_DATA_ROOT, "uploads"))
+os.environ.setdefault("CACHE_DIR", os.path.join(_TEST_DATA_ROOT, "cache"))
+
+TEST_API_KEY = "test-api-key-for-tests"
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +49,9 @@ def mock_sentence_transformer():
     mock = MagicMock()
     mock.get_sentence_embedding_dimension.return_value = 384
     mock.encode.side_effect = lambda texts, **kw: (
-        np.random.default_rng(42).random((len(texts) if isinstance(texts, list) else 1, 384)).astype("float32")
+        np.random.default_rng(42)
+        .random((len(texts) if isinstance(texts, list) else 1, 384))
+        .astype("float32")
         if isinstance(texts, list)
         else np.random.default_rng(42).random(384).astype("float32")
     )
@@ -43,9 +60,15 @@ def mock_sentence_transformer():
 
 @pytest.fixture()
 def client(mock_sentence_transformer):
-    """FastAPI TestClient with all heavy models mocked out."""
+    """FastAPI TestClient with all heavy models mocked out.
+
+    Sends a valid X-API-Key on every request by default so existing tests
+    exercise the authenticated path without each needing to know about auth.
+    Tests that specifically probe auth behavior should build their own
+    TestClient (see test_auth.py) instead of using this fixture.
+    """
     with patch("app.core.dependencies.SentenceTransformer", return_value=mock_sentence_transformer):
         from app.main import app
 
-        with TestClient(app) as c:
+        with TestClient(app, headers={"X-API-Key": TEST_API_KEY}) as c:
             yield c

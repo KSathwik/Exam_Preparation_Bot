@@ -1,6 +1,10 @@
 """Tests for document upload and management endpoints."""
 
 import io
+from pathlib import Path
+
+from app.api.documents import _safe_upload_path
+from app.core.config import settings
 
 
 def test_upload_rejects_unsupported_type(client):
@@ -45,3 +49,107 @@ def test_document_stats(client):
     data = resp.json()
     assert "vector_store" in data
     assert "timestamp" in data
+
+
+# ── Path traversal hardening ─────────────────────────────────────────
+
+
+def test_safe_upload_path_strips_directory_traversal():
+    path = _safe_upload_path("../../../etc/passwd", "abc123")
+    assert path.parent == Path(settings.upload_dir)
+    assert ".." not in path.name
+    assert path.name == "abc123_passwd"
+
+
+def test_safe_upload_path_strips_absolute_path():
+    path = _safe_upload_path("/etc/passwd", "abc123")
+    assert path.parent == Path(settings.upload_dir)
+    assert path.name == "abc123_passwd"
+
+
+def test_safe_upload_path_strips_windows_style_traversal():
+    path = _safe_upload_path("..\\..\\windows\\system32\\evil.pdf", "abc123")
+    assert path.parent == Path(settings.upload_dir)
+    assert ".." not in str(path.relative_to(Path(settings.upload_dir)))
+
+
+def test_safe_upload_path_handles_missing_filename():
+    path = _safe_upload_path(None, "abc123")
+    assert path.parent == Path(settings.upload_dir)
+    assert path.name == "abc123_upload"
+
+
+def test_safe_upload_path_handles_dot_dot_filename():
+    path = _safe_upload_path("..", "abc123")
+    assert path.name == "abc123_upload"
+
+
+# ── Upload happy path + delete cleanup ───────────────────────────────
+# Goes through the real endpoints (not a raw DB session) since TestClient
+# runs the app on its own thread — a SQLite `:memory:` session opened
+# directly from the test thread would not see the app's tables at all.
+
+
+def _make_docx_bytes() -> bytes:
+    from io import BytesIO
+
+    from docx import Document as DocxDocument
+
+    sentence = (
+        "Photosynthesis is the process by which green plants convert sunlight "
+        "into chemical energy stored in glucose molecules. "
+    )
+    doc = DocxDocument()
+    doc.add_paragraph(sentence * 15)  # comfortably over min_chunk_size (100 words)
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_upload_docx_happy_path(client):
+    resp = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "notes.docx",
+                _make_docx_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["total_chunks"] >= 1
+    assert data["document_id"]
+
+    # Clean up so this doesn't leak into other tests' document counts.
+    client.delete(f"/api/documents/{data['document_id']}")
+
+
+def test_delete_document_removes_file_and_vectors(client):
+    upload_resp = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "notes.docx",
+                _make_docx_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert upload_resp.status_code == 200
+    document_id = upload_resp.json()["document_id"]
+    assert upload_resp.json()["total_chunks"] >= 1
+
+    list_resp = client.get("/api/documents/list")
+    ids_before = [d["document_id"] for d in list_resp.json()["documents"]]
+    assert document_id in ids_before
+
+    delete_resp = client.delete(f"/api/documents/{document_id}")
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["removed_vectors"] >= 1
+
+    list_resp_after = client.get("/api/documents/list")
+    ids_after = [d["document_id"] for d in list_resp_after.json()["documents"]]
+    assert document_id not in ids_after

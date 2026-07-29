@@ -1,9 +1,11 @@
 """Unified configuration management for the Exam Prep Bot."""
 
-from pydantic_settings import BaseSettings
-from typing import List, Optional
-from loguru import logger
 from pathlib import Path
+from typing import List, Optional
+
+from loguru import logger
+from pydantic import ConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -36,7 +38,7 @@ class Settings(BaseSettings):
 
     # Model defaults per provider (overridden by model_name if set)
     model_name: Optional[str] = None
-    max_tokens: int = 1024
+    max_tokens: int = 700
     temperature: float = 0.3
     top_p: float = 0.95
 
@@ -49,7 +51,14 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
 
     # Embeddings
-    embedding_model: str = "all-MiniLM-L6-v2"
+    # BAAI/bge-small-en-v1.5: same 384 dimensions as the prior all-MiniLM-L6-v2
+    # default (no vector_dimension change), but retrieval-tuned rather than
+    # general sentence-similarity-tuned, at near-identical size/CPU latency.
+    # IMPORTANT: changing this setting on a deployment with an existing FAISS
+    # index requires a full reindex — old and new embeddings are not
+    # comparable, and load_index() has no way to detect a silent model
+    # mismatch (it only validates vector/metadata/embedding *counts* agree).
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     vector_dimension: int = 384
     batch_size: int = 32
 
@@ -61,6 +70,27 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     relevance_threshold: float = 0.2
     min_relevance_score: float = 0.1
+
+    # Hybrid retrieval: blend dense (FAISS) and lexical (BM25) scores as
+    # hybrid_dense_weight * dense_norm + (1 - hybrid_dense_weight) * bm25_norm.
+    # Default favors semantic similarity — exam-prep queries are often
+    # conceptual, not exact-keyword.
+    hybrid_dense_weight: float = 0.6
+
+    # Cross-encoder reranking of the merged candidate pool — opt-in and
+    # off by default; hybrid retrieval alone should capture most of the
+    # achievable gain at this project's current scale.
+    enable_cross_encoder_rerank: bool = False
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Conversation memory (Memory Agent) — only meaningful when persist=True.
+    # Semantic-memory fallback fires only when document retrieval misses
+    # (in_scope=False); a stricter threshold than relevance_threshold since a
+    # memory hit fully replaces the "nothing relevant" fallback message.
+    memory_relevance_threshold: float = 0.4
+    # Dual summarization trigger — whichever fires first.
+    memory_summarize_every_n_turns: int = 10
+    memory_summarize_token_threshold: int = 2000
 
     # Intent Classification
     intent_classification_threshold: float = 0.7
@@ -89,10 +119,25 @@ class Settings(BaseSettings):
     development_mode: bool = True
     sample_data_dir: str = "./data/sample_materials"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"
+    # Authentication — protects mutating/sensitive endpoints with an API key.
+    # Secure by default: if enabled and no key is configured, a random key is
+    # generated once at process startup and logged (see app.core.security).
+    api_auth_enabled: bool = True
+    app_api_key: Optional[str] = None
+
+    # If true, the server embeds the active API key into the page it serves at
+    # "/" so the bundled first-party UI works with no manual key entry.
+    # Trade-off: anyone who can load the page can view-source the key — this
+    # only makes sense when "anyone who can reach the server" is already your
+    # trust boundary (a private/internal deployment). Set to false and build
+    # real per-user authentication before this app has independent customers
+    # who shouldn't see each other's — or your — credentials.
+    expose_api_key_to_frontend: bool = True
+
+    # Rate limiting (requests per minute per client IP) on LLM-calling endpoints
+    rate_limit_per_minute: int = 30
+
+    model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 def _create_directories(s: Settings) -> None:

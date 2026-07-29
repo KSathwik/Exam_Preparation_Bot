@@ -16,20 +16,20 @@
         <div class="main-content">
             <div class="panel">
                 <h2>Upload Documents</h2>
-                <div class="upload-area" id="uploadArea">
-                    <div class="upload-icon">&#128196;</div>
+                <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Upload a PDF or DOCX document, max 50 MB">
+                    <div class="upload-icon" aria-hidden="true">&#128196;</div>
                     <div class="upload-text">Click to upload or drag &amp; drop</div>
                     <div class="upload-hint">PDF or DOCX (Max 50 MB)</div>
-                    <input type="file" id="fileInput" accept=".pdf,.docx">
+                    <input type="file" id="fileInput" accept=".pdf,.docx" aria-label="Choose a document file to upload" tabindex="-1">
                 </div>
-                <div id="uploadStatus"></div>
+                <div id="uploadStatus" role="status" aria-live="polite"></div>
 
                 <h2 class="mt">Ask Questions</h2>
                 <div class="chat-container">
-                    <div class="messages-box" id="messagesBox"></div>
+                    <div class="messages-box" id="messagesBox" role="log" aria-live="polite" aria-label="Conversation"></div>
                     <div class="input-area">
-                        <input type="text" id="queryInput" placeholder="Ask a question about your materials..." />
-                        <button class="btn btn-primary" id="sendBtn" onclick="sendQuery()">Send</button>
+                        <input type="text" id="queryInput" placeholder="Ask a question about your materials..." aria-label="Ask a question about your materials" />
+                        <button class="btn btn-primary" id="sendBtn" onclick="sendQuery()" aria-label="Send question">Send</button>
                     </div>
                 </div>
             </div>
@@ -37,9 +37,7 @@
             <div class="panel">
                 <h2>API Status</h2>
                 <div id="apiStatus" class="status info"><span>Checking API status...</span></div>
-
-                <h2 class="mt">Statistics</h2>
-                <div id="stats"><div class="status info">Loading statistics...</div></div>
+                <div id="docSummary" class="doc-summary"></div>
 
                 <h2 class="mt">About</h2>
                 <div class="about">
@@ -56,6 +54,24 @@
                 </div>
             </div>
         </div>
+
+        <details class="advanced-panel">
+            <summary>Advanced</summary>
+            <div class="advanced-content">
+                <h2>API Key</h2>
+                <div class="about">
+                    <p>Uploads and questions require an API key. This server applies one automatically when configured to; enter a different one here only to override it.</p>
+                </div>
+                <div class="input-area">
+                    <input type="password" id="apiKeyInput" placeholder="X-API-Key (auto-filled if the server provides one)" />
+                    <button class="btn btn-primary" id="saveKeyBtn" onclick="saveApiKey()">Save</button>
+                </div>
+                <div id="apiKeyStatus"></div>
+
+                <h2 class="mt">Statistics</h2>
+                <div id="stats"><div class="status info">Loading statistics...</div></div>
+            </div>
+        </details>
 
         <div id="responsePanel" class="response-panel" style="display:none">
             <div class="response-content">
