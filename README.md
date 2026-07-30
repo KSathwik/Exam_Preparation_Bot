@@ -1,14 +1,34 @@
 # Exam Prep Bot
 
-Production-grade exam preparation chatbot powered by an LLM (Anthropic Claude, OpenAI, or Google Gemini) + RAG.
+An AI study assistant for exam prep: upload your course material (PDF/DOCX) and ask questions in a
+ChatGPT/Claude-style chat interface, grounded entirely in what you uploaded — every answer carries
+source citations, a confidence score, and a hallucination-risk assessment, and nothing is answered
+from the model's general knowledge alone.
 
-- **FastAPI** backend with async/await and WebSocket streaming
-- **FAISS** vector search with sentence-transformer embeddings
-- **Intent classification** (8 types) with confidence scoring
-- **Source citations** and hallucination risk assessment
-- **SQLAlchemy** persistence for documents and queries
-- **API-key authentication + rate limiting** on sensitive/expensive endpoints
-- **Docker Compose** deployment (PostgreSQL + Redis + Nginx)
+**Chat experience**
+- Persistent, per-browser conversation history — auto-titled, searchable, renameable, deletable
+- Streaming answers with live progress ("Searching your documents…" → "Drafting an answer…" →
+  "Reviewing the draft…") instead of a silent multi-second wait
+- Markdown, syntax-highlighted code, and LaTeX math rendering in every response
+- Copy / regenerate / edit / stop on every message, plus contextual "Summarize" / "Explain simpler" /
+  "Explain in detail" follow-up chips under the latest answer
+- Retrieval scoped to the document(s) uploaded in the current conversation first, so answers stay
+  grounded in what you just asked about instead of blending in unrelated older uploads
+- Small talk ("hi", "thanks", "bye") is answered instantly with a generic reply, never routed through
+  the RAG pipeline
+- Light/dark/system theme, fully responsive (sidebar becomes an off-canvas drawer on mobile)
+
+**Underneath**
+- Multi-agent RAG pipeline (Orchestrator → Retrieval → Knowledge → Reflection → Memory), with an
+  always-on reflection pass that re-checks every draft against the source excerpts before it's shown
+- Hybrid retrieval — dense (FAISS) + lexical (BM25) — with optional cross-encoder reranking
+- Per-claim citation extraction, confidence scoring, and hallucination-risk assessment (no LLM call)
+- Multi-provider LLM support — Anthropic Claude, OpenAI, or Google Gemini, switchable via one setting
+- FastAPI backend with async/await and WebSocket streaming
+- SQLAlchemy + Alembic migrations for documents, conversations, and semantic conversation memory
+- API-key authentication + rate limiting on sensitive/expensive endpoints
+- Docker Compose deployment (PostgreSQL + Redis + Nginx)
+- 245+ tests, fully isolated from real project data
 
 ## Quick Start
 
@@ -53,11 +73,13 @@ app/
     health.py               # /health, /ready, /version, /config, /logs/tail
     documents.py             # /api/documents/upload, list, delete, stats
     queries.py               # /api/ask, /query, /intent, /batch, /history, /search, /ws
+    conversations.py          # /api/conversations — list/get/rename/delete chat history
   models/
     schemas.py               # Pydantic request/response schemas
     db_models.py              # SQLAlchemy ORM models
   services/
     pipeline.py               # ExamPrepBot — delegates to OrchestratorAgent
+    small_talk.py              # Greeting/thanks/farewell short-circuit (skips the RAG pipeline)
     agents/                     # Multi-agent pipeline (see docs/ARCHITECTURE.md)
       orchestrator.py             # Deterministic coordinator, all stages
       retrieval_agent.py            # Wraps HybridRetriever
@@ -67,19 +89,39 @@ app/
     parser.py                  # PDF/DOCX parsing + structural chunking
     embeddings.py                # Embedding generation + FAISS store + BM25 hybrid
     intent_classifier.py          # Hybrid rule + semantic classifier
-    retriever.py                   # Adaptive retrieval + reranking + memory fallback
+    retriever.py                   # Adaptive retrieval + reranking + document scoping + memory fallback
     llm_interface.py                 # Multi-provider LLM client (Gemini/OpenAI/Anthropic)
     validator.py                      # Citation extraction + confidence scoring
 frontend/
-  index.html               # Single-page UI
-  style.css                # Extracted stylesheet
-  app.js                   # Extracted JavaScript
+  index.html               # Single-page UI shell (sidebar + chat column + settings dialog)
+  style.css                # Design system (CSS custom properties, light/dark themes)
+  js/                       # ES modules, no build step — CDN-only third-party libs
+    main.js                    # Entry point, wires everything together
+    state.js                    # Shared in-memory + localStorage state (device/session/theme)
+    api.js                       # REST/WebSocket client wrappers
+    theme.js                      # Light/dark/system theme toggle
+    markdown.js                    # marked.js -> DOMPurify -> KaTeX rendering pipeline
+    chat.js                         # Message rendering + streaming + study-tool chips
+    input.js                         # Composer: auto-grow, drag-drop upload, send/stop
+    sidebar.js                        # Conversation list: search, switch, rename, delete
+    settings.js                        # Settings dialog (theme, developer options)
 alembic/                   # DB migrations (see CLAUDE.md Commands)
 docs/
   ARCHITECTURE.md          # Agent workflow, memory tiers, retrieval flow diagrams
   PHASE_2_ROADMAP.md       # Deliberately deferred scope
 tests/                     # pytest test suite
 ```
+
+## Chat UI
+
+The frontend is deliberately framework-free and build-step-free — plain ES modules
+(`<script type="module">`) loaded directly by the browser, with third-party libraries (marked.js,
+highlight.js, KaTeX, DOMPurify) pulled from a CDN rather than bundled. Conversations are scoped per
+browser, not per real user account: a `device_id` (`crypto.randomUUID()`, persisted in
+`localStorage`) identifies "this browser" and a `session_id` identifies one conversation, both sent
+alongside every question. There's no login yet — see `docs/PHASE_2_ROADMAP.md` for the multi-tenancy
+plan — so anyone who can reach the page can see conversations created from that same browser/device
+combination.
 
 ## Authentication
 
@@ -118,7 +160,7 @@ full list with defaults. Notable groups:
 | `EMBEDDING_MODEL` | Changing this on a deployment with an existing index requires a full reindex |
 | `HYBRID_DENSE_WEIGHT` | Dense vs. BM25 weight in hybrid retrieval (see `docs/ARCHITECTURE.md`) |
 | `ENABLE_CROSS_ENCODER_RERANK` | Opt-in reranking of the merged candidate pool, off by default |
-| `MEMORY_RELEVANCE_THRESHOLD`, `MEMORY_SUMMARIZE_*` | Conversation-memory tuning (only relevant once `MemoryAgent(persist=True)` is wired up — see `docs/PHASE_2_ROADMAP.md`) |
+| `MEMORY_RELEVANCE_THRESHOLD`, `MEMORY_SUMMARIZE_*` | Conversation-memory tuning (semantic recall across turns once a conversation summarizes) |
 
 ## API Endpoints
 
@@ -138,9 +180,13 @@ full list with defaults. Notable groups:
 | GET | `/api/intent/{query}` | ✓ | Classify intent only |
 | POST | `/api/batch` | ✓ | Batch queries (max 50) — rate-limited |
 | POST | `/api/search` | ✓ | Retrieve matching chunks without answering |
-| GET | `/api/history` | ✓ | Chat history |
+| GET | `/api/history` | ✓ | Chat history (legacy, process-wide) |
 | DELETE | `/api/history` | ✓ | Clear chat history |
 | WS | `/api/ws` | ✓ (query param) | WebSocket streaming |
+| GET | `/api/conversations` | ✓ | List conversations for a `device_id` |
+| GET | `/api/conversations/{id}` | ✓ | Full message history for one conversation |
+| PATCH | `/api/conversations/{id}` | ✓ | Rename a conversation |
+| DELETE | `/api/conversations/{id}` | ✓ | Delete a conversation + its semantic memory vectors |
 | POST | `/api/system/reset` | ✓ | Reset bot (clears history + vector store) |
 | GET | `/api/system/config` | – | Internal config summary |
 | GET | `/api/metrics` | ✓ | Metrics |
@@ -157,7 +203,7 @@ curl -X POST http://localhost:8000/api/ask \
 ## Running Tests
 
 ```bash
-pytest -v                          # full suite
+pytest -v                          # full suite (245+ tests)
 pytest tests/test_pipeline.py -v   # single file
 pytest --cov=app                   # with coverage
 ```
@@ -189,6 +235,8 @@ Configuration for all three lives in `pyproject.toml`. CI (`.github/workflows/ci
 - Review `RATE_LIMIT_PER_MINUTE` against your expected traffic and LLM provider budget
 - If changing `EMBEDDING_MODEL` on a deployment with existing documents, re-upload them after the
   change — old and new embeddings aren't comparable and there's no automatic reindex
+- Set `EXPOSE_API_KEY_TO_FRONTEND=false` and build real per-user login before this has independent
+  customers who shouldn't see each other's conversations or API key
 
 ## Troubleshooting
 
