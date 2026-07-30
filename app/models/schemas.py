@@ -47,6 +47,12 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     document_id: Optional[str] = None
     session_id: Optional[str] = None
+    device_id: Optional[str] = None
+    # Scopes retrieval to just these documents first, falling back to the
+    # full index if that misses — see AdaptiveRetriever.retrieve. Lets the
+    # frontend keep a conversation grounded in the document(s) actually
+    # uploaded there instead of searching every document ever uploaded.
+    document_ids: Optional[List[str]] = None
     top_k: Optional[int] = None
 
 
@@ -70,6 +76,7 @@ class QueryResponse(BaseModel):
     response_time_seconds: float
     format_type: str
     timestamp: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 # ── Chat ─────────────────────────────────────────────────────────────
@@ -80,6 +87,47 @@ class ChatMessageOut(BaseModel):
     content: str
     timestamp: str
     intent: Optional[str] = None
+
+
+# ── Conversations ────────────────────────────────────────────────────
+
+
+class ConversationSummaryOut(BaseModel):
+    session_id: str
+    title: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+
+
+class ConversationListResponse(BaseModel):
+    success: bool
+    total: int
+    conversations: List[ConversationSummaryOut]
+
+
+class ConversationDetailResponse(BaseModel):
+    success: bool
+    session_id: str
+    title: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    messages: List[ChatMessageOut]
+
+
+class ConversationRenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+
+class ConversationRenameResponse(BaseModel):
+    success: bool
+    conversation: ConversationSummaryOut
+
+
+class ConversationDeleteResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: str
 
 
 # ── Batch ────────────────────────────────────────────────────────────

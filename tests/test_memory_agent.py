@@ -186,3 +186,80 @@ def test_summarization_does_not_resummarize_same_turns(db_session_factory, monke
     assert mock_llm.summarize_conversation.call_count == 2
     second_transcript = mock_llm.summarize_conversation.call_args_list[1][0][0]
     assert all(m.content in ("q2", "a2") for m in second_transcript)
+
+
+# ── Conversation title + device_id (chat-history sidebar support) ────
+
+
+def test_persist_turn_sets_title_from_first_message(db_session_factory):
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=db_session_factory)
+
+    agent.record_turn("What is photosynthesis?", "It's how plants make energy.")
+
+    db = db_session_factory()
+    session_row = db.get(ChatSession, "sess-1")
+    assert session_row.title == "What is photosynthesis?"
+    db.close()
+
+
+def test_persist_turn_truncates_long_title(db_session_factory):
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=db_session_factory)
+    long_query = "Can you explain in great detail how the process of cellular respiration works?"
+
+    agent.record_turn(long_query, "Sure, here's an explanation.")
+
+    db = db_session_factory()
+    session_row = db.get(ChatSession, "sess-1")
+    assert session_row.title == long_query[:50].rstrip() + "…"
+    assert len(session_row.title) <= 51
+    db.close()
+
+
+def test_persist_turn_stores_device_id_on_new_session(db_session_factory):
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=db_session_factory)
+
+    agent.record_turn("q", "a", device_id="device-abc")
+
+    db = db_session_factory()
+    session_row = db.get(ChatSession, "sess-1")
+    assert session_row.device_id == "device-abc"
+    db.close()
+
+
+def test_persist_turn_backfills_device_id_when_missing(db_session_factory):
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=db_session_factory)
+
+    agent.record_turn("q1", "a1")  # no device_id yet
+    agent.record_turn("q2", "a2", device_id="device-abc")  # backfilled here
+
+    db = db_session_factory()
+    session_row = db.get(ChatSession, "sess-1")
+    assert session_row.device_id == "device-abc"
+    db.close()
+
+
+def test_persist_turn_does_not_overwrite_existing_title_on_subsequent_turns(db_session_factory):
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=db_session_factory)
+
+    agent.record_turn("First question", "First answer")
+    agent.record_turn("Second question", "Second answer")
+
+    db = db_session_factory()
+    session_row = db.get(ChatSession, "sess-1")
+    assert session_row.title == "First question"
+    db.close()
+
+
+def test_record_turn_session_id_override_takes_precedence_over_constructor_value(db_session_factory):
+    """Proves the concurrency-safety fix actually works: session_id must flow
+    as a per-call parameter, not be read from shared mutable instance state
+    (this agent is a process-wide singleton shared across concurrent
+    requests for different conversations)."""
+    agent = MemoryAgent([], persist=True, session_id="ctor-sess", db_session_factory=db_session_factory)
+
+    agent.record_turn("q", "a", session_id="call-sess")
+
+    db = db_session_factory()
+    assert db.get(ChatSession, "call-sess") is not None
+    assert db.get(ChatSession, "ctor-sess") is None
+    db.close()

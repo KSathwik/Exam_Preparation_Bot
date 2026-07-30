@@ -49,7 +49,7 @@ def test_retrieval_agent_delegates_to_retriever():
 
     result = agent.search("q", QueryType.DEFINITION, top_k=5)
 
-    retriever.search.assert_called_once_with("q", QueryType.DEFINITION, 5)
+    retriever.search.assert_called_once_with("q", QueryType.DEFINITION, 5, document_ids=None)
     assert result == {"chunks": [], "is_relevant": False}
 
 
@@ -259,3 +259,66 @@ def test_orchestrator_invokes_on_stage_callback(orchestrator):
     stages = []
     orchestrator.run("What is photosynthesis?", on_stage=lambda stage, payload: stages.append(stage))
     assert stages == ["retrieving", "drafting", "draft_ready", "reflecting", "final_ready"]
+
+
+def test_orchestrator_short_circuits_small_talk_before_retrieval(orchestrator, mock_retriever, mock_llm):
+    stages = []
+    result = orchestrator.run("hi", on_stage=lambda stage, payload: stages.append(stage))
+
+    assert result.format_type == "greeting"
+    assert result.sources == []
+    assert stages == []  # never reached retrieval/drafting/reflection
+    mock_retriever.search.assert_not_called()
+    mock_llm.generate_structured_answer.assert_not_called()
+    mock_llm.reflect_on_answer.assert_not_called()
+    assert orchestrator.memory_agent.chat_history[0].content == "hi"
+    assert orchestrator.memory_agent.chat_history[1].content == result.answer
+
+
+def test_orchestrator_forwards_session_id_and_device_id_to_memory_agent(
+    mock_intent_classifier, mock_llm, mock_retriever
+):
+    memory_agent = MagicMock()
+    orchestrator = OrchestratorAgent(
+        intent_classifier=mock_intent_classifier,
+        retrieval_agent=RetrievalAgent(mock_retriever),
+        knowledge_agent=KnowledgeAgent(mock_llm),
+        reflection_agent=ReflectionAgent(mock_llm),
+        memory_agent=memory_agent,
+    )
+
+    result = orchestrator.run("What is photosynthesis?", session_id="sess-1", device_id="device-1")
+
+    memory_agent.record_turn.assert_called_once_with(
+        "What is photosynthesis?",
+        result.answer,
+        QueryType.DEFINITION,
+        session_id="sess-1",
+        device_id="device-1",
+    )
+
+
+def test_orchestrator_forwards_document_ids_to_retrieval_agent(mock_intent_classifier, mock_llm):
+    retrieval_agent = MagicMock()
+    retrieval_agent.search.return_value = {
+        "query": "What is photosynthesis?",
+        "intent": QueryType.DEFINITION,
+        "chunks": [_make_chunk()],
+        "in_scope": True,
+        "is_relevant": True,
+        "relevance_score": 0.9,
+        "total_retrieved": 1,
+    }
+    orchestrator = OrchestratorAgent(
+        intent_classifier=mock_intent_classifier,
+        retrieval_agent=retrieval_agent,
+        knowledge_agent=KnowledgeAgent(mock_llm),
+        reflection_agent=ReflectionAgent(mock_llm),
+        memory_agent=MemoryAgent([]),
+    )
+
+    orchestrator.run("What is photosynthesis?", document_ids=["doc-1", "doc-2"])
+
+    retrieval_agent.search.assert_called_once_with(
+        "What is photosynthesis?", QueryType.DEFINITION, document_ids=["doc-1", "doc-2"]
+    )

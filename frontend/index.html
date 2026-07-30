@@ -1,93 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exam Prep Bot - Intelligent Study Assistant</title>
-    <link rel="stylesheet" href="/frontend/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exam Prep Bot</title>
+
+<script>
+  // Blocking (runs before CSS paints) so there's no flash of the wrong theme.
+  (function () {
+    try {
+      var stored = localStorage.getItem("examPrepTheme");
+      if (stored === "light" || stored === "dark") {
+        document.documentElement.setAttribute("data-theme", stored);
+      }
+    } catch (e) {}
+  })();
+</script>
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.18/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github.min.css" id="hljsLightTheme">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github-dark.min.css" id="hljsDarkTheme" disabled>
+<link rel="stylesheet" href="/frontend/style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Exam Prep Bot</h1>
-            <div class="badge">v1.0.0 - FastAPI</div>
-        </header>
 
-        <div class="main-content">
-            <div class="panel">
-                <h2>Upload Documents</h2>
-                <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Upload a PDF or DOCX document, max 50 MB">
-                    <div class="upload-icon" aria-hidden="true">&#128196;</div>
-                    <div class="upload-text">Click to upload or drag &amp; drop</div>
-                    <div class="upload-hint">PDF or DOCX (Max 50 MB)</div>
-                    <input type="file" id="fileInput" accept=".pdf,.docx" aria-label="Choose a document file to upload" tabindex="-1">
-                </div>
-                <div id="uploadStatus" role="status" aria-live="polite"></div>
+<div class="app-shell">
 
-                <h2 class="mt">Ask Questions</h2>
-                <div class="chat-container">
-                    <div class="messages-box" id="messagesBox" role="log" aria-live="polite" aria-label="Conversation"></div>
-                    <div class="input-area">
-                        <input type="text" id="queryInput" placeholder="Ask a question about your materials..." aria-label="Ask a question about your materials" />
-                        <button class="btn btn-primary" id="sendBtn" onclick="sendQuery()" aria-label="Send question">Send</button>
-                    </div>
-                </div>
-            </div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-            <div class="panel">
-                <h2>API Status</h2>
-                <div id="apiStatus" class="status info"><span>Checking API status...</span></div>
-                <div id="docSummary" class="doc-summary"></div>
-
-                <h2 class="mt">About</h2>
-                <div class="about">
-                    <p><strong>Exam Prep Bot v1.0.0</strong></p>
-                    <p>An intelligent study assistant powered by Claude AI.</p>
-                    <p class="mt"><strong>Features:</strong></p>
-                    <ul>
-                        <li>Multi-document support (PDF &amp; DOCX)</li>
-                        <li>Intent classification (8 types)</li>
-                        <li>Source citations with confidence</li>
-                        <li>Hallucination risk scoring</li>
-                        <li>WebSocket streaming</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <details class="advanced-panel">
-            <summary>Advanced</summary>
-            <div class="advanced-content">
-                <h2>API Key</h2>
-                <div class="about">
-                    <p>Uploads and questions require an API key. This server applies one automatically when configured to; enter a different one here only to override it.</p>
-                </div>
-                <div class="input-area">
-                    <input type="password" id="apiKeyInput" placeholder="X-API-Key (auto-filled if the server provides one)" />
-                    <button class="btn btn-primary" id="saveKeyBtn" onclick="saveApiKey()">Save</button>
-                </div>
-                <div id="apiKeyStatus"></div>
-
-                <h2 class="mt">Statistics</h2>
-                <div id="stats"><div class="status info">Loading statistics...</div></div>
-            </div>
-        </details>
-
-        <div id="responsePanel" class="response-panel" style="display:none">
-            <div class="response-content">
-                <div class="response-title">Answer</div>
-                <div class="response-text" id="answerText"></div>
-                <div class="metrics">
-                    <div class="metric"><div class="metric-value" id="intentValue">-</div><div class="metric-label">Intent</div></div>
-                    <div class="metric"><div class="metric-value" id="confidenceValue">-</div><div class="metric-label">Confidence</div></div>
-                    <div class="metric"><div class="metric-value" id="riskValue">-</div><div class="metric-label">Risk</div></div>
-                    <div class="metric"><div class="metric-value" id="timeValue">-</div><div class="metric-label">Time (s)</div></div>
-                </div>
-                <div class="sources" id="sourcesDiv"></div>
-            </div>
-        </div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo-mark" aria-hidden="true">E</span>
+      <span>Exam Prep Bot</span>
     </div>
 
-    <script src="/frontend/app.js"></script>
+    <button type="button" class="new-chat-btn" id="newChatBtn">
+      <span aria-hidden="true">+</span> New Chat
+    </button>
+
+    <div class="sidebar-search">
+      <input type="search" id="conversationSearch" placeholder="Search chats" aria-label="Search conversations">
+    </div>
+
+    <ul class="conversation-list" id="conversationList" aria-label="Conversation history"></ul>
+
+    <div class="sidebar-footer">
+      <button type="button" class="sidebar-footer-btn" id="settingsBtn">⚙ Settings</button>
+      <div class="user-profile-placeholder">
+        <span class="avatar" aria-hidden="true">G</span> Guest
+      </div>
+    </div>
+  </nav>
+
+  <main class="chat-column" id="chatColumn">
+    <div class="mobile-topbar">
+      <button type="button" id="sidebarToggleBtn" aria-label="Toggle conversation history">☰</button>
+      <strong>Exam Prep Bot</strong>
+    </div>
+
+    <div class="messages-box" id="messagesBox" role="log" aria-live="polite" aria-label="Conversation"></div>
+
+    <button type="button" class="jump-to-latest" id="jumpToLatestBtn" hidden>↓ Jump to latest</button>
+
+    <form class="composer" id="composerForm">
+      <input type="file" id="fileInput" accept=".pdf,.docx" hidden aria-label="Choose a document file to upload">
+      <div class="composer-inner">
+        <button type="button" class="composer-icon-btn" id="attachBtn" title="Attach a document" aria-label="Attach a document">📎</button>
+        <button type="button" class="composer-icon-btn" id="voiceBtn" title="Voice input (coming soon)" aria-label="Voice input, coming soon" disabled>🎤</button>
+        <textarea id="queryInput" rows="1" placeholder="Ask a question about your materials…" aria-label="Ask a question about your materials"></textarea>
+        <span class="char-count" id="charCount" hidden></span>
+        <button type="submit" class="composer-icon-btn" id="sendBtn" title="Send" aria-label="Send question">➤</button>
+      </div>
+    </form>
+  </main>
+
+</div>
+
+<dialog id="settingsModal">
+  <div class="settings-header">
+    <h2>Settings</h2>
+    <button type="button" class="settings-close-btn" id="closeSettingsBtn" aria-label="Close settings">✕</button>
+  </div>
+  <div class="settings-body">
+    <div class="settings-section">
+      <h3>Appearance</h3>
+      <div class="segmented-control" id="themeControl" role="group" aria-label="Theme">
+        <button type="button" data-theme-choice="system">System</button>
+        <button type="button" data-theme-choice="light">Light</button>
+        <button type="button" data-theme-choice="dark">Dark</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>About</h3>
+      <div class="settings-stats" id="settingsAbout">
+        Exam Prep Bot — an intelligent study assistant powered by Claude AI.
+      </div>
+      <details class="dev-options" id="devOptions">
+        <summary>Developer options</summary>
+        <div class="dev-options-content">
+          <input type="password" id="apiKeyInput" placeholder="X-API-Key override">
+          <button type="button" class="btn btn-primary" id="saveKeyBtn">Save</button>
+        </div>
+        <div class="settings-stats" id="settingsStats">Loading…</div>
+      </details>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@13.0.3/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.1.4/lib/index.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+<script type="module" src="/frontend/js/main.js"></script>
 </body>
 </html>

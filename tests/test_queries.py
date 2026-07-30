@@ -53,7 +53,17 @@ def test_ask_question(client, mock_bot):
     assert data["success"] is True
     assert data["answer"] == "42"
     assert data["query_intent"] == "definition"
-    mock_bot.answer_question.assert_called_once_with("What is X?")
+    mock_bot.answer_question.assert_called_once_with(
+        "What is X?", session_id=None, device_id=None, document_ids=None
+    )
+
+
+def test_ask_question_forwards_document_ids(client, mock_bot):
+    resp = client.post("/api/ask", json={"query": "What is X?", "document_ids": ["doc-1", "doc-2"]})
+    assert resp.status_code == 200
+    mock_bot.answer_question.assert_called_once_with(
+        "What is X?", session_id=None, device_id=None, document_ids=["doc-1", "doc-2"]
+    )
 
 
 def test_query_alias_matches_ask(client, mock_bot):
@@ -137,7 +147,7 @@ def test_websocket_streams_stage_events_and_completes(client, mock_bot):
         query="What is X?", primary_intent=QueryType.DEFINITION, confidence=0.9
     )
 
-    def fake_answer_question(query, on_stage=None):
+    def fake_answer_question(query, session_id=None, device_id=None, document_ids=None, on_stage=None):
         if on_stage:
             on_stage("retrieving", {})
             on_stage("drafting", {})
@@ -153,6 +163,12 @@ def test_websocket_streams_stage_events_and_completes(client, mock_bot):
 
         intent_msg = ws.receive_json()
         assert intent_msg["type"] == "intent"
+
+        retrieving_msg = ws.receive_json()
+        assert retrieving_msg == {"type": "status", "stage": "retrieving", "message": "Searching your documents…"}
+
+        drafting_msg = ws.receive_json()
+        assert drafting_msg == {"type": "status", "stage": "drafting", "message": "Drafting an answer…"}
 
         # Stage order matches OrchestratorAgent.run: draft_ready fires before
         # reflecting, so the draft chunk(s) arrive before the status message.
@@ -178,6 +194,25 @@ def test_websocket_streams_stage_events_and_completes(client, mock_bot):
 
         assert msg["type"] == "complete"
         assert msg["answer"] == "Final answer text."
+
+
+def test_websocket_forwards_document_ids(client, mock_bot):
+    mock_bot.intent_classifier.classify.return_value = IntentClassificationResult(
+        query="What is X?", primary_intent=QueryType.DEFINITION, confidence=0.9
+    )
+    mock_bot.answer_question.return_value = _fake_answer(text="Answer.")
+
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "What is X?", "document_ids": ["doc-1", "doc-2"]}')
+        while True:
+            msg = ws.receive_json()
+            if msg["type"] == "complete":
+                break
+
+    call_kwargs = mock_bot.answer_question.call_args.kwargs
+    assert call_kwargs["document_ids"] == ["doc-1", "doc-2"]
+    assert call_kwargs["session_id"] is None
+    assert call_kwargs["device_id"] is None
 
 
 def test_search_documents(client, monkeypatch, mock_intent_classifier):

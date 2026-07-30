@@ -18,7 +18,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api import documents, health, queries
+from app.api import conversations, documents, health, queries
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
@@ -110,6 +110,7 @@ async def log_requests(request: Request, call_next):
 app.include_router(health.router, tags=["Health"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(queries.router, prefix="/api", tags=["Queries"])
+app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
 
 
 # ── Root & static ────────────────────────────────────────────────────

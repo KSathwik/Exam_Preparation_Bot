@@ -51,10 +51,13 @@ class _BaseLLM(ABC):
             f"2. If the answer is not in the excerpts, say so clearly\n"
             f"3. Be accurate and cite the source pages when relevant\n"
             f"4. For the intent type '{intent.value}', structure your answer appropriately\n"
-            f"5. Be concise: default to roughly one paragraph or a short list. Only use more "
-            f"space than that when the intent structurally requires it (e.g. multiple "
-            f"comparison points or process steps) — never pad with restatement or extra "
-            f"elaboration beyond what the question needs"
+            f"5. Write in flowing prose paragraphs, not a bulleted or numbered list and not "
+            f"bold-header sections — a short list is only appropriate if the content is "
+            f"genuinely an unordered set of discrete items (not for a process, explanation, "
+            f"or definition, which should read as connected paragraphs even when they cover "
+            f"several stages or points). Use multiple paragraphs for anything with more than "
+            f"one facet — don't compress everything into a single dense paragraph either. "
+            f"Never pad with restatement or extra elaboration beyond what the question needs"
         )
         logger.info(
             f"LLM generate_answer: provider={settings.llm_provider}  model={self.model}  intent={intent.value}  context_chunks={len(retrieved_chunks)}"
@@ -203,7 +206,12 @@ class _BaseLLM(ABC):
         logger.info(f"LLM reflect_on_answer: intent={intent.value}  draft_length={len(draft_answer)}")
         start = time.time()
         try:
-            raw = self._call(system_prompt, user_message, max_tokens=max(self.max_tokens, 700))
+            # +500 over the draft's own budget: this call must reproduce the
+            # full (possibly near-max-length) draft inside a JSON wrapper —
+            # escaping expansion plus materially_changed/should_block/
+            # issues_found overhead — reusing the exact same ceiling risks
+            # truncating the JSON even when the draft itself fit comfortably.
+            raw = self._call(system_prompt, user_message, max_tokens=self.max_tokens + 500)
             duration = time.time() - start
             s = raw.find("{")
             e = raw.rfind("}") + 1

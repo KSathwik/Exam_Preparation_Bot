@@ -79,48 +79,54 @@ class IntentClassifier:
         QueryType.DEFINITION: (
             "You are a helpful study assistant.\n"
             "The user is asking for a definition.\n"
-            "Provide a clear, concise definition based ONLY on the provided document.\n"
+            "Provide a clear definition based ONLY on the provided document, written as one "
+            "or two flowing paragraphs of prose — not a bulleted list.\n"
             "If the definition is not in the document, say so clearly.\n"
-            "Format: Start with the term, then provide the definition."
+            "Format: Start with the term, then explain it in your own connected sentences."
         ),
         QueryType.EXPLAIN: (
             "You are a helpful study assistant.\n"
             "The user is asking for a detailed explanation.\n"
             "Provide a comprehensive explanation based ONLY on the provided document.\n"
             "Include key concepts, mechanisms, and how things work together.\n"
-            "Organize your answer logically with clear sections if needed."
+            "Write it as several connected paragraphs of prose, each covering one facet of "
+            "the topic — not a bulleted list and not bold-header sections."
         ),
         QueryType.COMPARE: (
             "You are a helpful study assistant.\n"
             "The user is asking to compare two or more concepts.\n"
-            "Provide a clear comparison based ONLY on the provided document.\n"
-            "Structure your answer as:\n"
-            "- Similarities (if any)\n- Key differences\n- When to use each\n"
-            "Use a table format if appropriate."
+            "Provide a clear comparison based ONLY on the provided document, written as "
+            "prose paragraphs — one paragraph on similarities (if any), one on the key "
+            "differences, and one on when to use each, rather than a bulleted list or table."
         ),
         QueryType.PROCESS: (
             "You are a helpful study assistant.\n"
             "The user is asking about a process or steps.\n"
-            "Provide step-by-step instructions based ONLY on the provided document.\n"
-            "Number the steps clearly and explain what happens at each stage."
+            "Describe the process based ONLY on the provided document as connected, flowing "
+            "paragraphs in the order the stages occur — not a numbered list. Use ordering "
+            "words in your sentences (first, next, after that, finally) to keep the sequence "
+            "clear instead of enumerating steps."
         ),
         QueryType.EXAMPLE: (
             "You are a helpful study assistant.\n"
             "The user is asking for examples.\n"
-            "Provide concrete examples based ONLY on the provided document.\n"
+            "Provide concrete examples based ONLY on the provided document, introducing and "
+            "explaining each one in its own sentence or two of prose rather than a bare list.\n"
             "If examples are not in the document, say so clearly.\n"
             "Explain why each example is relevant."
         ),
         QueryType.DIAGRAM: (
             "You are a helpful study assistant.\n"
             "The user is asking about a diagram or figure.\n"
-            "Describe what the diagram shows based ONLY on the provided document.\n"
+            "Describe what the diagram shows based ONLY on the provided document, as flowing "
+            "prose paragraphs rather than a bulleted breakdown.\n"
             "Explain the key elements and what they represent."
         ),
         QueryType.VAGUE: (
             "You are a helpful study assistant.\n"
             "The user's question is unclear.\n"
-            "Based on the provided document content, offer the most relevant information.\n"
+            "Based on the provided document content, offer the most relevant information as "
+            "prose paragraphs, not a bulleted list.\n"
             "If needed, ask for clarification about what specifically they want to know."
         ),
     }

@@ -88,6 +88,77 @@ def test_retrieve_empty_results():
     assert in_scope is False
 
 
+# ── document_ids scoping (prefer the conversation's own documents) ────
+
+
+def test_retrieve_uses_scoped_document_ids_when_they_hit():
+    vs = MagicMock()
+
+    def fake_search(query, top_k=None, content_types=None, document_ids=None):
+        if document_ids == ["doc-1"]:
+            return [_raw_result("Scoped chunk", 1, 0, 0.9, 1)]
+        return [_raw_result("Global chunk", 1, 0, 0.9, 1)]
+
+    vs.search.side_effect = fake_search
+    retriever = AdaptiveRetriever(vs)
+
+    chunks, in_scope = retriever.retrieve("What is X?", QueryType.DEFINITION, document_ids=["doc-1"])
+
+    assert in_scope is True
+    assert chunks[0].content == "Scoped chunk"
+    # The scoped search hit — no need to also search the full index.
+    assert vs.search.call_count == 1
+
+
+def test_retrieve_treats_weak_scoped_match_as_in_scope_without_falling_back():
+    """A vague meta-question ("what's in this document?") often has weak raw
+    embedding similarity to the document's own text even when it's exactly
+    the right document — falling back to the full index in that case let a
+    coincidentally higher-scoring, unrelated document win (the "confusing
+    between different uploads" bug). An explicit document scope must be
+    authoritative: never overridden by a below-relevance_threshold score."""
+    vs = MagicMock()
+
+    def fake_search(query, top_k=None, content_types=None, document_ids=None):
+        if document_ids == ["doc-1"]:
+            return [_raw_result("Weak scoped chunk", 1, 0, 0.01, 1)]
+        return [_raw_result("Global chunk", 1, 0, 0.9, 1)]
+
+    vs.search.side_effect = fake_search
+    retriever = AdaptiveRetriever(vs)
+
+    chunks, in_scope = retriever.retrieve("What is X?", QueryType.DEFINITION, document_ids=["doc-1"])
+
+    assert in_scope is True
+    assert chunks[0].content == "Weak scoped chunk"
+    # Only the scoped search should have run — a non-empty scoped result
+    # never falls through to the full index.
+    assert vs.search.call_count == 1
+
+
+def test_retrieve_falls_back_to_full_index_when_scoped_search_returns_nothing():
+    vs = MagicMock()
+
+    def fake_search(query, top_k=None, content_types=None, document_ids=None):
+        if document_ids == ["doc-1"]:
+            return []
+        return [_raw_result("Global chunk", 1, 0, 0.9, 1)]
+
+    vs.search.side_effect = fake_search
+    retriever = AdaptiveRetriever(vs)
+
+    chunks, in_scope = retriever.retrieve("What is X?", QueryType.DEFINITION, document_ids=["doc-1"])
+
+    assert in_scope is True
+    assert chunks[0].content == "Global chunk"
+
+
+def test_retrieve_without_document_ids_only_searches_once(mock_vector_store):
+    retriever = AdaptiveRetriever(mock_vector_store)
+    retriever.retrieve("What is X?", QueryType.DEFINITION)
+    assert mock_vector_store.search.call_count == 1
+
+
 def test_rerank_by_intent_process_orders_by_page_then_chunk_index(mock_vector_store):
     retriever = AdaptiveRetriever(mock_vector_store)
     chunks, _ = retriever.retrieve("steps", QueryType.PROCESS)

@@ -39,16 +39,24 @@ def _build_response(request: QueryRequest, answer_with_sources) -> QueryResponse
         response_time_seconds=answer_with_sources.response_time_seconds,
         format_type=answer_with_sources.format_type,
         timestamp=datetime.now().isoformat(),
+        session_id=request.session_id,
     )
 
 
 async def _answer_query(payload: QueryRequest) -> QueryResponse:
     logger.info(
-        f"[API /ask] query={payload.query!r}  document_id={payload.document_id}  session_id={payload.session_id}"
+        f"[API /ask] query={payload.query!r}  document_id={payload.document_id}  "
+        f"session_id={payload.session_id}  device_id={payload.device_id}"
     )
     bot = get_bot()
     try:
-        answer = await run_in_threadpool(bot.answer_question, payload.query)
+        answer = await run_in_threadpool(
+            bot.answer_question,
+            payload.query,
+            session_id=payload.session_id,
+            device_id=payload.device_id,
+            document_ids=payload.document_ids,
+        )
         response = _build_response(payload, answer)
         logger.info(
             f"[API /ask] OK: intent={response.query_intent}  confidence={response.overall_confidence:.3f}  "
@@ -181,6 +189,9 @@ async def websocket_query(websocket: WebSocket):
             data = await websocket.receive_text()
             message = json.loads(data)
             query = message.get("query", "")
+            session_id = message.get("session_id")
+            device_id = message.get("device_id")
+            document_ids = message.get("document_ids")
             if not query:
                 await websocket.send_json({"type": "error", "message": "Query is required"})
                 continue
@@ -222,7 +233,15 @@ async def websocket_query(websocket: WebSocket):
                         if item is None:
                             return
                         stage, payload = item
-                        if stage == "reflecting":
+                        if stage == "retrieving":
+                            await websocket.send_json(
+                                {"type": "status", "stage": "retrieving", "message": "Searching your documents…"}
+                            )
+                        elif stage == "drafting":
+                            await websocket.send_json(
+                                {"type": "status", "stage": "drafting", "message": "Drafting an answer…"}
+                            )
+                        elif stage == "reflecting":
                             await websocket.send_json(
                                 {
                                     "type": "status",
@@ -237,7 +256,14 @@ async def websocket_query(websocket: WebSocket):
 
                 drain_task = asyncio.create_task(_drain_stage_queue())
                 try:
-                    answer = await run_in_threadpool(bot.answer_question, query, on_stage)
+                    answer = await run_in_threadpool(
+                        bot.answer_question,
+                        query,
+                        session_id=session_id,
+                        device_id=device_id,
+                        document_ids=document_ids,
+                        on_stage=on_stage,
+                    )
                 finally:
                     await stage_queue.put(None)
                     await drain_task
@@ -255,6 +281,7 @@ async def websocket_query(websocket: WebSocket):
                         "confidence": answer.overall_confidence,
                         "hallucination_risk": answer.hallucination_risk,
                         "response_time": answer.response_time_seconds,
+                        "session_id": session_id,
                     }
                 )
             except Exception as e:

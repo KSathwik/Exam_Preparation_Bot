@@ -2,11 +2,12 @@
 
 import time
 import uuid
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from loguru import logger
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 
 from .agents import KnowledgeAgent, MemoryAgent, OrchestratorAgent, ReflectionAgent, RetrievalAgent
 from .embeddings import VectorStoreManager
@@ -52,7 +53,13 @@ class ExamPrepBot:
             retrieval_agent=RetrievalAgent(self.retriever),
             knowledge_agent=KnowledgeAgent(self.llm),
             reflection_agent=ReflectionAgent(self.llm),
-            memory_agent=MemoryAgent(self.chat_history),
+            memory_agent=MemoryAgent(
+                self.chat_history,
+                persist=True,
+                db_session_factory=SessionLocal,
+                llm=self.llm,
+                vector_store_manager=self.vector_store_manager,
+            ),
             span_extractor=self.span_extractor,
             confidence_scorer=self.confidence_scorer,
         )
@@ -86,14 +93,30 @@ class ExamPrepBot:
     # Question answering (full RAG pipeline)
     # ------------------------------------------------------------------
     def answer_question(
-        self, query: str, on_stage: Optional[Callable[[str, dict], None]] = None
+        self,
+        query: str,
+        session_id: Optional[str] = None,
+        device_id: Optional[str] = None,
+        document_ids: Optional[List[str]] = None,
+        on_stage: Optional[Callable[[str, dict], None]] = None,
     ) -> AnswerWithSources:
         """Run the multi-agent pipeline (intent -> retrieval -> draft ->
         reflection -> memory) — see ``OrchestratorAgent.run`` for the stage
-        breakdown. ``on_stage`` is an optional progress callback (used by the
-        WebSocket route for progressive status/draft/final events); REST and
-        batch callers simply omit it."""
-        return self.orchestrator.run(query, on_stage=on_stage)
+        breakdown. ``session_id``/``device_id`` scope conversation persistence
+        (see ``MemoryAgent``) to one conversation/browser; omit for the legacy
+        global in-memory-only behavior. ``document_ids``, when given, scopes
+        retrieval to just those documents first (falling back to the full
+        index if that misses) — see ``AdaptiveRetriever.retrieve``. ``on_stage``
+        is an optional progress callback (used by the WebSocket route for
+        progressive status/draft/final events); REST and batch callers simply
+        omit it."""
+        return self.orchestrator.run(
+            query,
+            session_id=session_id,
+            device_id=device_id,
+            document_ids=document_ids,
+            on_stage=on_stage,
+        )
 
     # ------------------------------------------------------------------
     # Stats / Reset

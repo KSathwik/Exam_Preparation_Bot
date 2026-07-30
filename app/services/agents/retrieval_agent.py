@@ -1,6 +1,6 @@
 """RetrievalAgent — thin wrapper over HybridRetriever for the multi-agent pipeline."""
 
-from typing import Optional
+from typing import List, Optional
 
 from ..models import QueryType
 from ..retriever import HybridRetriever
@@ -17,5 +17,11 @@ class RetrievalAgent:
     def __init__(self, retriever: HybridRetriever):
         self.retriever = retriever
 
-    def search(self, query: str, intent: QueryType, top_k: Optional[int] = None) -> dict:
-        return self.retriever.search(query, intent, top_k)
+    def search(
+        self,
+        query: str,
+        intent: QueryType,
+        top_k: Optional[int] = None,
+        document_ids: Optional[List[str]] = None,
+    ) -> dict:
+        return self.retriever.search(query, intent, top_k, document_ids=document_ids)

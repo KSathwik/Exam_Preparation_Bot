@@ -60,6 +60,15 @@ class ChatSession(Base):
     # no concept of a logged-in user; this makes the schema ready for real
     # multi-user auth later without another migration (see architecture plan).
     user_id = Column(String(36), nullable=True)
+    # Anonymous per-browser identity (crypto.randomUUID(), persisted client-side
+    # in localStorage) used to scope the chat-history sidebar to one browser —
+    # deliberately a separate column from user_id, which is reserved for a real
+    # authenticated user later; conflating the two would make user_id ambiguous
+    # once real auth lands.
+    device_id = Column(String(36), nullable=True, index=True)
+    # Derived once from the first user message (truncated, no LLM call) when
+    # this session is created; user-renameable afterward via PATCH.
+    title = Column(String(255), nullable=True)
     # Running counters, updated alongside message inserts, so the
     # summarization-trigger check (every N turns / token threshold) is an O(1)
     # column read instead of a COUNT(*) over chat_messages.

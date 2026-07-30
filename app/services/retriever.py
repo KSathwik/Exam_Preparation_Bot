@@ -56,17 +56,9 @@ class AdaptiveRetriever:
             )
             return chunks
 
-    def retrieve(
-        self, query: str, intent: QueryType, top_k: Optional[int] = None
+    def _score_results(
+        self, query: str, raw_results: List[Tuple[dict, float, int]], top_k: int
     ) -> Tuple[List[RetrievedChunk], bool]:
-        if top_k is None:
-            top_k = self._TOP_K_STRATEGY.get(intent, settings.retrieval_top_k)
-
-        raw_results = self.vector_store.search(query, top_k=top_k * 2)
-        if not raw_results:
-            logger.debug(f"No raw results for query: {query!r}")
-            return self._try_memory_fallback(query, top_k)
-
         chunks = []
         for chunk_info, similarity, rank in raw_results[:top_k]:
             meta = ChunkMetadata(**chunk_info.get("metadata", {}))
@@ -89,6 +81,47 @@ class AdaptiveRetriever:
             f"threshold={self.relevance_threshold}  in_scope={in_scope}  "
             f"n_chunks={len(chunks)}"
         )
+        return chunks, in_scope
+
+    def retrieve(
+        self,
+        query: str,
+        intent: QueryType,
+        top_k: Optional[int] = None,
+        document_ids: Optional[List[str]] = None,
+    ) -> Tuple[List[RetrievedChunk], bool]:
+        if top_k is None:
+            top_k = self._TOP_K_STRATEGY.get(intent, settings.retrieval_top_k)
+
+        if document_ids:
+            # Restrict the candidate pool up front to the document(s) the
+            # user actually uploaded in this conversation. Deliberately
+            # unconditional once any chunk exists there — NOT gated behind
+            # relevance_threshold like the global path below. A vague
+            # meta-question ("what's in this document?", "summarize this")
+            # often has weak raw embedding similarity to the document's own
+            # text (a meta-question doesn't share vocabulary with the
+            # content it's asking about), which would otherwise read as a
+            # "miss" and fall through to the full index — where a
+            # completely unrelated document can coincidentally score higher
+            # and win. That's the exact "confusing between different
+            # uploads" failure mode this scoping exists to prevent, so an
+            # explicit document scope is treated as authoritative: only an
+            # empty result set (the id has no indexed chunks at all, e.g. a
+            # deleted document) falls through to the full-index search.
+            scoped_raw = self.vector_store.search(query, top_k=top_k * 2, document_ids=document_ids)
+            if scoped_raw:
+                chunks, _ = self._score_results(query, scoped_raw, top_k)
+                logger.info(f"[RETRIEVAL] Scoped to document_ids={document_ids} — {len(chunks)} chunk(s)")
+                return chunks, True
+            logger.debug(f"[RETRIEVAL] No indexed chunks for document_ids={document_ids} — trying full index")
+
+        raw_results = self.vector_store.search(query, top_k=top_k * 2)
+        if not raw_results:
+            logger.debug(f"No raw results for query: {query!r}")
+            return self._try_memory_fallback(query, top_k)
+
+        chunks, in_scope = self._score_results(query, raw_results, top_k)
 
         if not in_scope:
             # Document retrieval missed — try semantic memory before giving
@@ -146,8 +179,14 @@ class HybridRetriever:
     def __init__(self, vector_store: Optional[VectorStoreManager] = None):
         self.adaptive = AdaptiveRetriever(vector_store)
 
-    def search(self, query: str, intent: QueryType, top_k: Optional[int] = None) -> dict:
-        chunks, in_scope = self.adaptive.retrieve(query, intent, top_k)
+    def search(
+        self,
+        query: str,
+        intent: QueryType,
+        top_k: Optional[int] = None,
+        document_ids: Optional[List[str]] = None,
+    ) -> dict:
+        chunks, in_scope = self.adaptive.retrieve(query, intent, top_k, document_ids=document_ids)
         relevance_score = chunks[0].relevance_score if chunks else 0.0
         # in_scope already reflects the full decision — including a semantic
         # memory hit replacing a missed document search — so is_relevant

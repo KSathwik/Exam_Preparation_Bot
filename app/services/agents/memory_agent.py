@@ -28,6 +28,16 @@ def _estimate_tokens(text: str) -> int:
     return len(text.split())
 
 
+def _derive_title(text: str, limit: int = 50) -> str:
+    """Conversation title derived from the first user message — a plain
+    truncation, no extra LLM call. Authoritative once stored; user-renameable
+    afterward via the conversations API."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
 class MemoryAgent:
     """Wraps a bot's `chat_history` list, stored by reference (see `RetrievalAgent`)."""
 
@@ -47,7 +57,14 @@ class MemoryAgent:
         self.llm = llm
         self.vector_store_manager = vector_store_manager
 
-    def record_turn(self, query: str, answer: str, intent: Optional[QueryType] = None) -> None:
+    def record_turn(
+        self,
+        query: str,
+        answer: str,
+        intent: Optional[QueryType] = None,
+        session_id: Optional[str] = None,
+        device_id: Optional[str] = None,
+    ) -> None:
         now = datetime.now().isoformat()
         self.chat_history.append(ChatMessage(role="user", content=query, timestamp=now, intent_type=intent))
         self.chat_history.append(
@@ -55,10 +72,24 @@ class MemoryAgent:
         )
 
         if self.persist:
-            self._persist_turn(query, answer, intent)
+            # session_id/device_id are per-call parameters, not mutated instance
+            # state: this agent is a process-wide singleton shared across
+            # concurrent requests (thread-pool-executed), so storing "the
+            # current conversation" on self would race between requests for
+            # different conversations. self.session_id is only a fallback
+            # default, kept for backward compatibility with direct construction.
+            resolved_session_id = session_id or self.session_id
+            self._persist_turn(query, answer, intent, resolved_session_id, device_id)
 
-    def _persist_turn(self, query: str, answer: str, intent: Optional[QueryType]) -> None:
-        if not (self.session_id and self.db_session_factory):
+    def _persist_turn(
+        self,
+        query: str,
+        answer: str,
+        intent: Optional[QueryType],
+        session_id: Optional[str],
+        device_id: Optional[str] = None,
+    ) -> None:
+        if not (session_id and self.db_session_factory):
             logger.warning(
                 "[MEMORY] persist=True but session_id/db_session_factory missing — skipping persistence"
             )
@@ -66,15 +97,17 @@ class MemoryAgent:
 
         db = self.db_session_factory()
         try:
-            session_row = db.get(ChatSession, self.session_id)
+            session_row = db.get(ChatSession, session_id)
             if session_row is None:
-                session_row = ChatSession(id=self.session_id)
+                session_row = ChatSession(id=session_id, device_id=device_id, title=_derive_title(query))
                 db.add(session_row)
                 db.flush()
+            elif device_id and not session_row.device_id:
+                session_row.device_id = device_id  # opportunistic backfill for older/partial rows
 
             last_msg = (
                 db.query(ChatMessageRecord)
-                .filter_by(session_id=self.session_id)
+                .filter_by(session_id=session_id)
                 .order_by(ChatMessageRecord.id.desc())
                 .first()
             )
@@ -84,7 +117,7 @@ class MemoryAgent:
             user_tokens = running_total + _estimate_tokens(query)
             db.add(
                 ChatMessageRecord(
-                    session_id=self.session_id,
+                    session_id=session_id,
                     role="user",
                     content=query,
                     intent=intent_value,
@@ -95,7 +128,7 @@ class MemoryAgent:
 
             assistant_tokens = user_tokens + _estimate_tokens(answer)
             assistant_msg = ChatMessageRecord(
-                session_id=self.session_id,
+                session_id=session_id,
                 role="assistant",
                 content=answer,
                 intent=intent_value,
@@ -105,7 +138,7 @@ class MemoryAgent:
             session_row.turn_count += 1
             db.flush()
 
-            self._maybe_summarize(db, session_row, assistant_msg)
+            self._maybe_summarize(db, session_row, assistant_msg, session_id)
             db.commit()
         except Exception as exc:
             db.rollback()
@@ -115,7 +148,9 @@ class MemoryAgent:
         finally:
             db.close()
 
-    def _maybe_summarize(self, db, session_row: ChatSession, latest_message: ChatMessageRecord) -> None:
+    def _maybe_summarize(
+        self, db, session_row: ChatSession, latest_message: ChatMessageRecord, session_id: str
+    ) -> None:
         """Dual threshold — whichever fires first: every N turns, or the
         cumulative (running-total) token count since the last summary
         crossing a threshold. Both checks are O(1) column reads/lookups,
@@ -139,7 +174,7 @@ class MemoryAgent:
         from_id = (session_row.last_summarized_message_id or 0) + 1
         turns = (
             db.query(ChatMessageRecord)
-            .filter(ChatMessageRecord.session_id == self.session_id, ChatMessageRecord.id >= from_id)
+            .filter(ChatMessageRecord.session_id == session_id, ChatMessageRecord.id >= from_id)
             .order_by(ChatMessageRecord.id)
             .all()
         )
@@ -162,7 +197,7 @@ class MemoryAgent:
         memory_id = str(uuid.uuid4())
         memory_row = ConversationMemory(
             id=memory_id,
-            session_id=self.session_id,
+            session_id=session_id,
             summary_text=summary_text,
             covers_from_message_id=turns[0].id,
             covers_to_message_id=turns[-1].id,
@@ -174,9 +209,7 @@ class MemoryAgent:
 
         if self.vector_store_manager is not None:
             try:
-                self.vector_store_manager.add_memory(
-                    summary_text, session_id=self.session_id, memory_id=memory_id
-                )
+                self.vector_store_manager.add_memory(summary_text, session_id=session_id, memory_id=memory_id)
                 memory_row.embedded = True
             except Exception as exc:
                 logger.warning(

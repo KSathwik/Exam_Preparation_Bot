@@ -48,6 +48,9 @@ logs/
 uploads/
 cache/
 data/faiss_index/
+
+# Ad-hoc manual test outputs
+/*_test_answer.txt
 data/embeddings/
 *.db
 

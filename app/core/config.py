@@ -38,7 +38,10 @@ class Settings(BaseSettings):
 
     # Model defaults per provider (overridden by model_name if set)
     model_name: Optional[str] = None
-    max_tokens: int = 700
+    # 700 was cutting off comprehensive/multi-section answers mid-word once
+    # the draft actually needed the space (e.g. several categorized lists) —
+    # raised to give real headroom before hitting the provider's stop condition.
+    max_tokens: int = 2048
     temperature: float = 0.3
     top_p: float = 0.95
 
@@ -87,7 +90,13 @@ class Settings(BaseSettings):
     # Semantic-memory fallback fires only when document retrieval misses
     # (in_scope=False); a stricter threshold than relevance_threshold since a
     # memory hit fully replaces the "nothing relevant" fallback message.
-    memory_relevance_threshold: float = 0.4
+    # Raised from 0.4 -> 0.6: with it at 0.4, mediocre-but-passable recall of
+    # old chat summaries was answering questions that should have stayed
+    # grounded in the freshly uploaded document (or fallen through to the
+    # plain out-of-scope message) — the currently uploaded material should
+    # dominate answers, with memory only stepping in for a near-certain topic
+    # match, not "vaguely related to something we discussed before."
+    memory_relevance_threshold: float = 0.6
     # Dual summarization trigger — whichever fires first.
     memory_summarize_every_n_turns: int = 10
     memory_summarize_token_threshold: int = 2000

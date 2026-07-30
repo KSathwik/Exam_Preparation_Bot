@@ -228,6 +228,23 @@ def test_search_on_empty_index_returns_empty(manager):
     assert manager.search("anything", top_k=5) == []
 
 
+def test_search_with_document_ids_filters_to_those_documents(manager):
+    manager.add_document(_document(chunk_count=1), document_id="doc-1")
+    manager.add_document(_document(chunk_count=1), document_id="doc-2")
+
+    results = manager.search("anything", top_k=5, document_ids=["doc-1"])
+    assert len(results) == 1
+    assert results[0][0]["document_id"] == "doc-1"
+
+
+def test_search_with_document_ids_excludes_unlisted_documents(manager):
+    manager.add_document(_document(chunk_count=1), document_id="doc-1")
+    manager.add_document(_document(chunk_count=1), document_id="doc-2")
+
+    results = manager.search("anything", top_k=5, document_ids=["doc-3"])
+    assert results == []
+
+
 # ── Hybrid retrieval: BM25 lexical signal blended with dense similarity ──
 
 

@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..intent_classifier import IntentClassifier
 from ..models import AnswerWithSources, QueryType, RetrievedChunk, SourceCitation
+from ..small_talk import match_small_talk
 from ..validator import ConfidenceScorer, SpanExtractor
 from .knowledge_agent import KnowledgeAgent
 from .memory_agent import MemoryAgent
@@ -53,12 +54,43 @@ class OrchestratorAgent:
         self.span_extractor = span_extractor or SpanExtractor()
         self.confidence_scorer = confidence_scorer or ConfidenceScorer()
 
-    def run(self, query: str, on_stage: Optional[OnStage] = None) -> AnswerWithSources:
+    def run(
+        self,
+        query: str,
+        session_id: Optional[str] = None,
+        device_id: Optional[str] = None,
+        document_ids: Optional[List[str]] = None,
+        on_stage: Optional[OnStage] = None,
+    ) -> AnswerWithSources:
         on_stage = on_stage or _noop_on_stage
         logger.info(f"[ORCHESTRATOR] ===== New query: {query!r} =====")
         start = time.time()
 
         try:
+            # Stage 0: Small talk (greetings/thanks/farewells) short-circuits
+            # before intent classification even runs — retrieval and the LLM
+            # have nothing useful to do with "hi", and routing it through the
+            # full pipeline is exactly what produced an unprompted document
+            # summary instead of a plain reply.
+            small_talk_reply = match_small_talk(query)
+            if small_talk_reply is not None:
+                duration = time.time() - start
+                logger.info(f"[ORCHESTRATOR] Small talk detected — skipping retrieval/LLM  duration={duration:.3f}s")
+                result = AnswerWithSources(
+                    answer=small_talk_reply,
+                    query_intent=QueryType.VAGUE,
+                    intent_confidence=1.0,
+                    sources=[],
+                    overall_confidence=1.0,
+                    hallucination_risk="low",
+                    response_time_seconds=duration,
+                    format_type="greeting",
+                )
+                self.memory_agent.record_turn(
+                    query, small_talk_reply, QueryType.VAGUE, session_id=session_id, device_id=device_id
+                )
+                return result
+
             # Stage 1: Intent classification
             t0 = time.time()
             intent_result = self.intent_classifier.classify(query)
@@ -72,7 +104,7 @@ class OrchestratorAgent:
             # Stage 2: Retrieval
             t0 = time.time()
             on_stage("retrieving", {})
-            retrieval_result = self.retrieval_agent.search(query, intent)
+            retrieval_result = self.retrieval_agent.search(query, intent, document_ids=document_ids)
             chunks = retrieval_result["chunks"]
             is_relevant = retrieval_result["is_relevant"]
             logger.info(
@@ -172,7 +204,9 @@ class OrchestratorAgent:
             )
 
             # Stage 7: Memory
-            self.memory_agent.record_turn(query, final_answer, intent)
+            self.memory_agent.record_turn(
+                query, final_answer, intent, session_id=session_id, device_id=device_id
+            )
 
             logger.info(f"[ORCHESTRATOR] ===== Query complete: total_duration={response_time:.3f}s =====")
             return result

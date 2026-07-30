@@ -19,6 +19,7 @@ PROTECTED_ENDPOINTS = [
     ("get", "/api/metrics"),
     ("get", "/logs/tail"),
     ("get", "/api/history"),
+    ("get", "/api/conversations?device_id=test-device"),
 ]
 
 PUBLIC_ENDPOINTS = [

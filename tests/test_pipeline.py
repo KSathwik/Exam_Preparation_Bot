@@ -141,6 +141,30 @@ def test_get_stats(bot, mock_vector_store_manager):
     assert stats["chat_history_length"] == len(bot.chat_history)
 
 
+def test_answer_question_passes_through_session_id_and_device_id(bot, monkeypatch):
+    monkeypatch.setattr(bot.orchestrator, "run", MagicMock(return_value=MagicMock()))
+
+    bot.answer_question("What is photosynthesis?", session_id="sess-1", device_id="device-1")
+
+    bot.orchestrator.run.assert_called_once_with(
+        "What is photosynthesis?",
+        session_id="sess-1",
+        device_id="device-1",
+        document_ids=None,
+        on_stage=None,
+    )
+
+
+def test_exam_prep_bot_wires_memory_agent_for_persistence(bot, mock_llm, mock_vector_store_manager):
+    from app.core.database import SessionLocal
+
+    memory_agent = bot.orchestrator.memory_agent
+    assert memory_agent.persist is True
+    assert memory_agent.llm is mock_llm
+    assert memory_agent.vector_store_manager is mock_vector_store_manager
+    assert memory_agent.db_session_factory is SessionLocal
+
+
 def test_upload_document_generates_document_id(bot, mock_vector_store_manager, tmp_path, monkeypatch):
     from app.services import pipeline as pipeline_module
     from app.services.models import Document
