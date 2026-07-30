@@ -165,7 +165,11 @@ def test_websocket_streams_stage_events_and_completes(client, mock_bot):
         assert intent_msg["type"] == "intent"
 
         retrieving_msg = ws.receive_json()
-        assert retrieving_msg == {"type": "status", "stage": "retrieving", "message": "Searching your documents…"}
+        assert retrieving_msg == {
+            "type": "status",
+            "stage": "retrieving",
+            "message": "Searching your documents…",
+        }
 
         drafting_msg = ws.receive_json()
         assert drafting_msg == {"type": "status", "stage": "drafting", "message": "Drafting an answer…"}

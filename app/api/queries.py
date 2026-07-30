@@ -235,7 +235,11 @@ async def websocket_query(websocket: WebSocket):
                         stage, payload = item
                         if stage == "retrieving":
                             await websocket.send_json(
-                                {"type": "status", "stage": "retrieving", "message": "Searching your documents…"}
+                                {
+                                    "type": "status",
+                                    "stage": "retrieving",
+                                    "message": "Searching your documents…",
+                                }
                             )
                         elif stage == "drafting":
                             await websocket.send_json(

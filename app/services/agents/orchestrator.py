@@ -75,7 +75,9 @@ class OrchestratorAgent:
             small_talk_reply = match_small_talk(query)
             if small_talk_reply is not None:
                 duration = time.time() - start
-                logger.info(f"[ORCHESTRATOR] Small talk detected — skipping retrieval/LLM  duration={duration:.3f}s")
+                logger.info(
+                    f"[ORCHESTRATOR] Small talk detected — skipping retrieval/LLM  duration={duration:.3f}s"
+                )
                 result = AnswerWithSources(
                     answer=small_talk_reply,
                     query_intent=QueryType.VAGUE,
