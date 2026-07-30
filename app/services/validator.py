@@ -92,8 +92,12 @@ class ConfidenceScorer:
         avg_relevance = sum(c.relevance_score for c in retrieved_chunks) / len(retrieved_chunks)
         citation_rate = min(1.0, len(citations) / max(1, num_claims)) if num_claims > 0 else 0.5
 
+        # A thorough answer legitimately draws on several pages — that's
+        # breadth, not a sign of poor grounding, so a wide source spread
+        # should cost a little, not most, of this term (was 0.2/extra page,
+        # e.g. 10 pages -> 0.36; now -> 0.53).
         pages = [c.metadata.page_number for c in retrieved_chunks]
-        source_consistency = 1.0 / (1.0 + (len(set(pages)) - 1) * 0.2)
+        source_consistency = 1.0 / (1.0 + (len(set(pages)) - 1) * 0.1)
 
         return min(
             1.0,
@@ -106,11 +110,18 @@ class ConfidenceScorer:
         citations: List[SourceCitation],
         num_claims: int,
     ) -> str:
+        # Thresholds calibrated against calculate_answer_confidence's actual
+        # achievable range: it's a weighted blend of three sub-1.0 terms, so
+        # even a well-grounded answer rarely clears ~0.75-0.8 overall (that
+        # would need avg_relevance, citation_rate, *and* source_consistency
+        # all near-perfect simultaneously) — the original 0.85/0.6 cutoffs
+        # were calibrated as if confidence commonly approached 1.0, which
+        # pushed nearly everything into "high" regardless of actual quality.
         confidence = self.calculate_answer_confidence(retrieved_chunks, citations, num_claims)
         citation_rate = len(citations) / max(1, num_claims) if num_claims > 0 else 0.0
-        if confidence > 0.85 and citation_rate > 0.8:
+        if confidence > 0.7 and citation_rate > 0.7:
             return "low"
-        if confidence > 0.6 and citation_rate > 0.5:
+        if confidence > 0.45 and citation_rate > 0.4:
             return "medium"
         return "high"
 
@@ -131,5 +142,26 @@ def _split_sentences(text: str) -> List[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
 
 
+def _token_overlap(a: str, b: str) -> float:
+    """Word-level Dice coefficient — robust to clause reordering and minor
+    rewording between a claim and its source span, which raw character-
+    sequence matching (below) is not. A claim that restructures a sentence
+    while keeping the same key terms/numbers still overlaps heavily here
+    even when its character sequence looks quite different."""
+    words_a = set(re.findall(r"\w+", a.lower()))
+    words_b = set(re.findall(r"\w+", b.lower()))
+    if not words_a or not words_b:
+        return 0.0
+    return 2 * len(words_a & words_b) / (len(words_a) + len(words_b))
+
+
 def _similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    """Best of two complementary measures: character-sequence ratio (best
+    for near-verbatim quotes) and word-overlap (best for a paraphrase that
+    reorders or lightly rewords the same source content). Using only the
+    former was flagging plenty of genuinely-grounded, merely-paraphrased
+    claims as unsupported — extracted claims are the drafting LLM's own
+    summary of the source, never a verbatim quote, so requiring high
+    character-sequence similarity was the wrong bar for what this is
+    actually checking."""
+    return max(SequenceMatcher(None, a.lower(), b.lower()).ratio(), _token_overlap(a, b))
