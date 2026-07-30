@@ -12,6 +12,8 @@ from typing import Callable, List, Optional, Tuple
 
 from loguru import logger
 
+from ..conversation_scope import resolve_document_scope
+from ..global_search import is_global_search_request
 from ..intent_classifier import IntentClassifier
 from ..models import AnswerWithSources, QueryType, RetrievedChunk, SourceCitation
 from ..small_talk import match_small_talk
@@ -45,6 +47,7 @@ class OrchestratorAgent:
         memory_agent: MemoryAgent,
         span_extractor: Optional[SpanExtractor] = None,
         confidence_scorer: Optional[ConfidenceScorer] = None,
+        db_session_factory: Optional[Callable] = None,
     ):
         self.intent_classifier = intent_classifier
         self.retrieval_agent = retrieval_agent
@@ -53,6 +56,11 @@ class OrchestratorAgent:
         self.memory_agent = memory_agent
         self.span_extractor = span_extractor or SpanExtractor()
         self.confidence_scorer = confidence_scorer or ConfidenceScorer()
+        # Enables resolving a conversation's authoritative document scope
+        # from the DB (see resolve_document_scope) — optional so tests that
+        # construct this agent directly with mocks keep today's
+        # pass-document_ids-straight-through behavior unchanged.
+        self.db_session_factory = db_session_factory
 
     def run(
         self,
@@ -91,6 +99,7 @@ class OrchestratorAgent:
                 self.memory_agent.record_turn(
                     query, small_talk_reply, QueryType.VAGUE, session_id=session_id, device_id=device_id
                 )
+                on_stage("answer_ready", {"answer": result.answer})
                 return result
 
             # Stage 1: Intent classification
@@ -105,8 +114,26 @@ class OrchestratorAgent:
 
             # Stage 2: Retrieval
             t0 = time.time()
-            on_stage("retrieving", {})
-            retrieval_result = self.retrieval_agent.search(query, intent, document_ids=document_ids)
+
+            if is_global_search_request(query):
+                # Explicit opt-out of conversation scoping — see
+                # is_global_search_request. document_ids=None tells
+                # AdaptiveRetriever.retrieve to search the full index.
+                resolved_document_ids = None
+                logger.info(f"[ORCHESTRATOR] Explicit global search request detected: {query!r}")
+            elif self.db_session_factory is not None:
+                resolved_document_ids = resolve_document_scope(
+                    self.db_session_factory, session_id, document_ids
+                )
+            else:
+                # No DB access configured (e.g. a test constructing this
+                # agent directly with mocks) — keep the caller-supplied value
+                # exactly as before.
+                resolved_document_ids = document_ids
+
+            retrieval_result = self.retrieval_agent.search(
+                query, intent, document_ids=resolved_document_ids, session_id=session_id
+            )
             chunks = retrieval_result["chunks"]
             is_relevant = retrieval_result["is_relevant"]
             logger.info(
@@ -119,8 +146,8 @@ class OrchestratorAgent:
                 logger.warning(
                     f"[ORCHESTRATOR] Query out of scope — returning fallback  total_duration={duration:.3f}s"
                 )
-                return AnswerWithSources(
-                    answer="I couldn't find anything relevant to that in your uploaded materials. Try asking something more specific about their content — see the loaded documents below.",
+                result = AnswerWithSources(
+                    answer="I couldn't find this information in the uploaded documents. Try asking something more specific about their content — see the loaded documents below.",
                     query_intent=intent,
                     intent_confidence=intent_confidence,
                     sources=[],
@@ -129,10 +156,13 @@ class OrchestratorAgent:
                     response_time_seconds=duration,
                     format_type="out_of_scope",
                 )
+                on_stage("answer_ready", {"answer": result.answer})
+                return result
 
-            # Stage 3: Draft generation (Knowledge Agent)
+            # Stage 3: Draft generation (Knowledge Agent) — runs fully
+            # server-side; the draft is never shown to the user, only the
+            # post-reflection text below (see Stage 5).
             t0 = time.time()
-            on_stage("drafting", {})
             structured = self.knowledge_agent.generate(query, chunks, intent)
             draft_answer = structured["answer"]
             claims = structured["claims"]
@@ -140,7 +170,6 @@ class OrchestratorAgent:
                 f"[ORCHESTRATOR] Stage 3 — Draft: answer_length={len(draft_answer)}  "
                 f"claims={len(claims)}  duration={time.time()-t0:.3f}s"
             )
-            on_stage("draft_ready", {"answer": draft_answer})
 
             # Stage 4: Citation extraction & confidence scoring on the draft
             citations, overall_confidence, hallucination_risk = self._score(claims, chunks)
@@ -149,9 +178,10 @@ class OrchestratorAgent:
                 f"confidence={overall_confidence:.3f}  hallucination_risk={hallucination_risk}"
             )
 
-            # Stage 5: Reflection (always-on)
+            # Stage 5: Reflection (always-on) — silent quality-control pass;
+            # never surfaced to the user (see on_stage below, which only
+            # fires once the final, already-reflected text is ready).
             t0 = time.time()
-            on_stage("reflecting", {"message": "Reviewing the draft answer for accuracy..."})
             validator_summary = (
                 f"{len(citations)}/{len(claims)} claims cited, "
                 f"confidence={overall_confidence:.2f}, hallucination_risk={hallucination_risk}"
@@ -168,7 +198,7 @@ class OrchestratorAgent:
                 logger.warning(
                     f"[ORCHESTRATOR] Reflection blocked the draft answer  total_duration={duration:.3f}s"
                 )
-                return AnswerWithSources(
+                result = AnswerWithSources(
                     answer="I found information related to your question, but couldn't produce a reliable answer from it. Try rephrasing your question or checking the source material directly.",
                     query_intent=intent,
                     intent_confidence=intent_confidence,
@@ -178,20 +208,22 @@ class OrchestratorAgent:
                     response_time_seconds=duration,
                     format_type="reflection_blocked",
                 )
+                on_stage("answer_ready", {"answer": result.answer})
+                return result
 
             final_answer = reflection["revised_answer"]
-            if reflection["materially_changed"]:
-                # Stage 6: Conditional re-validation against the revised text
-                t0 = time.time()
-                revised_claims = self.knowledge_agent.llm.extract_claims(final_answer, chunks)
-                citations, overall_confidence, hallucination_risk = self._score(revised_claims, chunks)
-                claims = revised_claims
-                logger.info(
-                    f"[ORCHESTRATOR] Stage 6 — Re-validation: claims={len(claims)}  "
-                    f"citations={len(citations)}/{len(claims)}  duration={time.time()-t0:.3f}s"
-                )
-
-            on_stage("final_ready", {"answer": final_answer})
+            # Stage 6: Final scoring — reflection returns its own claims for
+            # the (possibly revised) answer in the same call, so no separate
+            # re-extraction round trip is needed even when materially_changed.
+            # A None (reflection failed, or genuinely returned nothing) falls
+            # back to the draft's own claims — correct either way, since an
+            # unchanged answer's claims are unchanged too.
+            final_claims = reflection.get("claims") or claims
+            citations, overall_confidence, hallucination_risk = self._score(final_claims, chunks)
+            logger.info(
+                f"[ORCHESTRATOR] Stage 6 — Final scoring: claims={len(final_claims)}  "
+                f"citations={len(citations)}/{len(final_claims)}  confidence={overall_confidence:.3f}"
+            )
 
             response_time = time.time() - start
             result = AnswerWithSources(
@@ -210,6 +242,7 @@ class OrchestratorAgent:
                 query, final_answer, intent, session_id=session_id, device_id=device_id
             )
 
+            on_stage("answer_ready", {"answer": result.answer})
             logger.info(f"[ORCHESTRATOR] ===== Query complete: total_duration={response_time:.3f}s =====")
             return result
 
@@ -219,7 +252,7 @@ class OrchestratorAgent:
                 f"[ORCHESTRATOR] ===== Query FAILED: error={type(e).__name__}: {e}  duration={duration:.3f}s ====="
             )
             logger.exception("[ORCHESTRATOR] Full traceback:")
-            return AnswerWithSources(
+            result = AnswerWithSources(
                 answer=f"An error occurred: {e}",
                 query_intent=QueryType.VAGUE,
                 intent_confidence=0.0,
@@ -229,6 +262,8 @@ class OrchestratorAgent:
                 response_time_seconds=duration,
                 format_type="error",
             )
+            on_stage("answer_ready", {"answer": result.answer})
+            return result
 
     def _score(
         self, claims: List[str], chunks: List[RetrievedChunk]

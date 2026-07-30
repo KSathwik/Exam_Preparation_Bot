@@ -49,7 +49,7 @@ def test_retrieval_agent_delegates_to_retriever():
 
     result = agent.search("q", QueryType.DEFINITION, top_k=5)
 
-    retriever.search.assert_called_once_with("q", QueryType.DEFINITION, 5, document_ids=None)
+    retriever.search.assert_called_once_with("q", QueryType.DEFINITION, 5, document_ids=None, session_id=None)
     assert result == {"chunks": [], "is_relevant": False}
 
 
@@ -208,28 +208,37 @@ def test_orchestrator_out_of_scope_short_circuits_before_llm(orchestrator, mock_
         "relevance_score": 0.0,
         "total_retrieved": 0,
     }
-    result = orchestrator.run("Something totally unrelated")
+    stages = []
+    result = orchestrator.run(
+        "Something totally unrelated", on_stage=lambda stage, payload: stages.append((stage, payload))
+    )
     assert result.format_type == "out_of_scope"
     assert result.hallucination_risk == "high"
+    assert result.answer.startswith("I couldn't find this information in the uploaded documents.")
     mock_llm.generate_structured_answer.assert_not_called()
     mock_llm.reflect_on_answer.assert_not_called()
+    # Out-of-scope streams to the client exactly like every other path.
+    assert stages == [("answer_ready", {"answer": result.answer})]
 
 
 def test_orchestrator_reflection_materially_changed_triggers_revalidation(orchestrator, mock_llm):
+    """Reflection returns its own claims for the revised answer in the same
+    call — no separate re-extraction round trip. Proven here with a claim
+    that deliberately doesn't match the chunk (unlike the draft's claim,
+    which does): if the code incorrectly fell back to the draft's claims,
+    a citation would appear."""
     mock_llm.reflect_on_answer.return_value = {
         "revised_answer": "Revised: photosynthesis converts light into stored chemical energy.",
         "materially_changed": True,
         "should_block": False,
         "issues_found": ["clarified wording"],
+        "claims": [{"claim": "A completely unrelated claim about volcanoes.", "chunks": []}],
     }
-    mock_llm.extract_claims.return_value = [{"claim": "Revised claim about photosynthesis.", "chunks": [1]}]
 
     result = orchestrator.run("What is photosynthesis?")
 
     assert result.answer == "Revised: photosynthesis converts light into stored chemical energy."
-    mock_llm.extract_claims.assert_called_once_with(
-        "Revised: photosynthesis converts light into stored chemical energy.", [_make_chunk()]
-    )
+    assert result.sources == []
 
 
 def test_orchestrator_reflection_should_block_returns_fixed_fallback(orchestrator, mock_llm):
@@ -240,25 +249,36 @@ def test_orchestrator_reflection_should_block_returns_fixed_fallback(orchestrato
         "issues_found": ["hallucinated throughout"],
     }
 
-    result = orchestrator.run("What is photosynthesis?")
+    stages = []
+    result = orchestrator.run(
+        "What is photosynthesis?", on_stage=lambda stage, payload: stages.append((stage, payload))
+    )
 
     assert result.format_type == "reflection_blocked"
     assert result.hallucination_risk == "high"
     assert result.sources == []
+    # The user never saw the blocked draft — only this fixed fallback streams.
+    assert stages == [("answer_ready", {"answer": result.answer})]
 
 
 def test_orchestrator_handles_llm_failure_gracefully(orchestrator, mock_llm):
     mock_llm.generate_structured_answer.side_effect = RuntimeError("provider unavailable")
-    result = orchestrator.run("What is photosynthesis?")
+    stages = []
+    result = orchestrator.run(
+        "What is photosynthesis?", on_stage=lambda stage, payload: stages.append((stage, payload))
+    )
     assert result.format_type == "error"
     assert result.hallucination_risk == "high"
     assert result.overall_confidence == 0.0
+    assert stages == [("answer_ready", {"answer": result.answer})]
 
 
 def test_orchestrator_invokes_on_stage_callback(orchestrator):
+    """Drafting and reflection both happen silently — on_stage only ever
+    fires once, carrying the final, already-reflected answer text."""
     stages = []
     orchestrator.run("What is photosynthesis?", on_stage=lambda stage, payload: stages.append(stage))
-    assert stages == ["retrieving", "drafting", "draft_ready", "reflecting", "final_ready"]
+    assert stages == ["answer_ready"]
 
 
 def test_orchestrator_short_circuits_small_talk_before_retrieval(orchestrator, mock_retriever, mock_llm):
@@ -267,7 +287,10 @@ def test_orchestrator_short_circuits_small_talk_before_retrieval(orchestrator, m
 
     assert result.format_type == "greeting"
     assert result.sources == []
-    assert stages == []  # never reached retrieval/drafting/reflection
+    # Never reached retrieval/drafting/reflection, but the single
+    # answer_ready event still fires so every response path streams the
+    # same way to the client.
+    assert stages == ["answer_ready"]
     mock_retriever.search.assert_not_called()
     mock_llm.generate_structured_answer.assert_not_called()
     mock_llm.reflect_on_answer.assert_not_called()
@@ -320,5 +343,82 @@ def test_orchestrator_forwards_document_ids_to_retrieval_agent(mock_intent_class
     orchestrator.run("What is photosynthesis?", document_ids=["doc-1", "doc-2"])
 
     retrieval_agent.search.assert_called_once_with(
-        "What is photosynthesis?", QueryType.DEFINITION, document_ids=["doc-1", "doc-2"]
+        "What is photosynthesis?", QueryType.DEFINITION, document_ids=["doc-1", "doc-2"], session_id=None
+    )
+
+
+def test_orchestrator_resolves_document_ids_from_db_when_session_id_given(
+    monkeypatch, mock_intent_classifier, mock_llm
+):
+    """With a db_session_factory configured, the orchestrator resolves the
+    conversation's authoritative document scope instead of trusting the
+    caller-supplied document_ids verbatim — see resolve_document_scope."""
+    import app.services.agents.orchestrator as orchestrator_module
+
+    resolve_mock = MagicMock(return_value=["doc-server-1"])
+    monkeypatch.setattr(orchestrator_module, "resolve_document_scope", resolve_mock)
+
+    retrieval_agent = MagicMock()
+    retrieval_agent.search.return_value = {
+        "query": "What is photosynthesis?",
+        "intent": QueryType.DEFINITION,
+        "chunks": [_make_chunk()],
+        "in_scope": True,
+        "is_relevant": True,
+        "relevance_score": 0.9,
+        "total_retrieved": 1,
+    }
+    fake_db_session_factory = MagicMock()
+    orchestrator = OrchestratorAgent(
+        intent_classifier=mock_intent_classifier,
+        retrieval_agent=retrieval_agent,
+        knowledge_agent=KnowledgeAgent(mock_llm),
+        reflection_agent=ReflectionAgent(mock_llm),
+        memory_agent=MemoryAgent([]),
+        db_session_factory=fake_db_session_factory,
+    )
+
+    orchestrator.run("What is photosynthesis?", session_id="sess-1", document_ids=["client-side-stale-id"])
+
+    resolve_mock.assert_called_once_with(fake_db_session_factory, "sess-1", ["client-side-stale-id"])
+    retrieval_agent.search.assert_called_once_with(
+        "What is photosynthesis?", QueryType.DEFINITION, document_ids=["doc-server-1"], session_id="sess-1"
+    )
+
+
+def test_orchestrator_global_search_request_overrides_scope_to_none(
+    monkeypatch, mock_intent_classifier, mock_llm
+):
+    """An explicit 'search across all my documents'-style query bypasses
+    conversation scoping entirely, even when a session_id/db factory would
+    otherwise resolve a narrower scope."""
+    import app.services.agents.orchestrator as orchestrator_module
+
+    resolve_mock = MagicMock(return_value=["doc-server-1"])
+    monkeypatch.setattr(orchestrator_module, "resolve_document_scope", resolve_mock)
+
+    retrieval_agent = MagicMock()
+    retrieval_agent.search.return_value = {
+        "query": "search across all my documents for X",
+        "intent": QueryType.DEFINITION,
+        "chunks": [_make_chunk()],
+        "in_scope": True,
+        "is_relevant": True,
+        "relevance_score": 0.9,
+        "total_retrieved": 1,
+    }
+    orchestrator = OrchestratorAgent(
+        intent_classifier=mock_intent_classifier,
+        retrieval_agent=retrieval_agent,
+        knowledge_agent=KnowledgeAgent(mock_llm),
+        reflection_agent=ReflectionAgent(mock_llm),
+        memory_agent=MemoryAgent([]),
+        db_session_factory=MagicMock(),
+    )
+
+    orchestrator.run("search across all my documents for X", session_id="sess-1")
+
+    resolve_mock.assert_not_called()
+    retrieval_agent.search.assert_called_once_with(
+        "search across all my documents for X", QueryType.DEFINITION, document_ids=None, session_id="sess-1"
     )

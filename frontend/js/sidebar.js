@@ -5,7 +5,7 @@
 
 import { state, setSessionId, newConversationId, loadPersistedSessionId, clearDocumentIds } from "./state.js";
 import { listConversations, getConversation, renameConversation, deleteConversation } from "./api.js";
-import { renderHistory, clearMessages, stopStreaming } from "./chat.js";
+import { renderHistory, clearMessages, stopStreaming, showHistorySkeleton, showEmptyStateIfNeeded } from "./chat.js";
 
 let listEl;
 let searchInput;
@@ -78,13 +78,20 @@ function buildItem(convo) {
       ev.stopPropagation();
       closeAllMenus();
       if (!confirm("Delete this conversation? This cannot be undone.")) return;
+
+      // Optimistic: reflect the delete immediately rather than waiting on
+      // the network round-trip before the UI updates.
+      const wasActive = state.sessionId === convo.session_id;
+      state.conversations = state.conversations.filter((c) => c.session_id !== convo.session_id);
+      applySearchFilter();
+      if (wasActive) startNewChat();
+
       try {
         await deleteConversation(convo.session_id);
       } catch {
-        /* best-effort — still remove locally */
+        // Roll back — the delete didn't actually happen server-side.
+        await refreshConversationList();
       }
-      if (state.sessionId === convo.session_id) startNewChat();
-      refreshConversationList();
     });
 
     menu.append(renameBtn, deleteBtn);
@@ -107,10 +114,15 @@ function startRename(li, convo) {
   const commit = async () => {
     const newTitle = input.value.trim();
     if (newTitle && newTitle !== convo.title) {
+      // Optimistic: reflect the new title immediately, don't wait on the
+      // network round-trip first.
+      convo.title = newTitle;
+      applySearchFilter();
       try {
         await renameConversation(convo.session_id, newTitle);
       } catch {
-        /* ignore — list refresh below will show the pre-rename title if it failed */
+        await refreshConversationList(); // roll back — the rename didn't stick server-side
+        return;
       }
     }
     refreshConversationList();
@@ -172,11 +184,14 @@ async function switchConversation(sessionId) {
   clearDocumentIds();
   highlightActive();
   closeSidebarOnMobile();
+  showHistorySkeleton();
   try {
     const data = await getConversation(sessionId);
     renderHistory(data.messages || []);
+    if (!data.messages || data.messages.length === 0) showEmptyStateIfNeeded();
   } catch {
     clearMessages();
+    showEmptyStateIfNeeded();
   }
 }
 
@@ -187,6 +202,7 @@ export function startNewChat() {
   clearDocumentIds();
   highlightActive();
   closeSidebarOnMobile();
+  showEmptyStateIfNeeded();
 }
 
 function closeSidebarOnMobile() {
@@ -233,11 +249,14 @@ export async function initSidebar() {
     try {
       const data = await getConversation(persisted);
       renderHistory(data.messages || []);
+      if (!data.messages || data.messages.length === 0) showEmptyStateIfNeeded();
     } catch {
       setSessionId(newConversationId());
+      showEmptyStateIfNeeded();
     }
   } else {
     setSessionId(newConversationId());
+    showEmptyStateIfNeeded();
   }
 
   await refreshConversationList();

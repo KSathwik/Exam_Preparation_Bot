@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 import app.api.conversations as conversations_module
 from app.core.database import get_db
 from app.main import app
-from app.models.db_models import Base, ChatMessageRecord, ChatSession, ConversationMemory
+from app.models.db_models import Base, ChatMessageRecord, ChatSession, ConversationMemory, DocumentRecord
 
 
 @pytest.fixture()
@@ -150,6 +150,38 @@ def test_delete_conversation_cascades_messages_and_memories(client, db_session_f
     assert db.get(ChatSession, "sess-a1") is None
     assert db.query(ChatMessageRecord).filter_by(session_id="sess-a1").count() == 0
     assert db.query(ConversationMemory).filter_by(session_id="sess-a1").count() == 0
+    db.close()
+
+
+def test_delete_conversation_cascades_documents(client, db_session_factory, monkeypatch):
+    """Each conversation is its own isolated notebook — deleting it deletes
+    the document(s) that belonged only to it, not just messages/memories."""
+    _seed_session(db_session_factory, "sess-a1")
+    db = db_session_factory()
+    db.add(
+        DocumentRecord(
+            id="doc-1",
+            file_name="resume.pdf",
+            file_type="pdf",
+            file_size_mb=0.1,
+            total_chunks=2,
+            session_id="sess-a1",
+        )
+    )
+    db.commit()
+    db.close()
+
+    mock_bot = MagicMock()
+    monkeypatch.setattr(conversations_module, "get_bot", lambda: mock_bot)
+
+    resp = client.delete("/api/conversations/sess-a1")
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    mock_bot.vector_store_manager.remove_document.assert_called_once_with("doc-1")
+
+    db = db_session_factory()
+    assert db.query(DocumentRecord).filter_by(id="doc-1").first() is None
     db.close()
 
 

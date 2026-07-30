@@ -211,21 +211,32 @@ async def websocket_query(websocket: WebSocket):
             try:
                 # bot.answer_question runs in a worker thread (see
                 # run_in_threadpool below); on_stage fires from that thread,
-                # so events are bridged onto the event loop via
+                # so the event is bridged onto the event loop via
                 # call_soon_threadsafe into a queue and sent by a concurrent
-                # drain task, keeping stage/draft/final events in order and
-                # fully flushed before "complete" is sent.
+                # drain task, fully flushed before "complete" is sent.
+                #
+                # Only one on_stage event ever fires now — "answer_ready",
+                # carrying the final, already-reflected answer text (see
+                # OrchestratorAgent.run). Drafting and reflection both happen
+                # silently server-side first; nothing about that internal
+                # pipeline is ever exposed to the client, which only ever
+                # sees a generic "thinking" state (rendered client-side, no
+                # server message needed) followed by this one streamed answer.
                 loop = asyncio.get_running_loop()
                 stage_queue: asyncio.Queue = asyncio.Queue()
 
                 def on_stage(stage: str, payload: dict) -> None:
                     loop.call_soon_threadsafe(stage_queue.put_nowait, (stage, payload))
 
-                async def _send_chunks(text: str, stage_label: str, chunk_size: int = 50) -> None:
+                # Paced so delivery reads as continuous natural typing rather
+                # than the whole answer popping in at once — there is no
+                # per-provider token stream to relay (see llm_interface.py),
+                # so this pacing is what makes an already-fully-generated
+                # string feel like it's streaming.
+                async def _send_chunks(text: str, chunk_size: int = 40, delay_seconds: float = 0.02) -> None:
                     for i in range(0, len(text), chunk_size):
-                        await websocket.send_json(
-                            {"type": "chunk", "text": text[i : i + chunk_size], "stage": stage_label}
-                        )
+                        await websocket.send_json({"type": "chunk", "text": text[i : i + chunk_size]})
+                        await asyncio.sleep(delay_seconds)
 
                 async def _drain_stage_queue() -> None:
                     while True:
@@ -233,30 +244,8 @@ async def websocket_query(websocket: WebSocket):
                         if item is None:
                             return
                         stage, payload = item
-                        if stage == "retrieving":
-                            await websocket.send_json(
-                                {
-                                    "type": "status",
-                                    "stage": "retrieving",
-                                    "message": "Searching your documents…",
-                                }
-                            )
-                        elif stage == "drafting":
-                            await websocket.send_json(
-                                {"type": "status", "stage": "drafting", "message": "Drafting an answer…"}
-                            )
-                        elif stage == "reflecting":
-                            await websocket.send_json(
-                                {
-                                    "type": "status",
-                                    "stage": "reflecting",
-                                    "message": payload.get("message", ""),
-                                }
-                            )
-                        elif stage == "draft_ready":
-                            await _send_chunks(payload.get("answer", ""), "draft")
-                        elif stage == "final_ready":
-                            await _send_chunks(payload.get("answer", ""), "final")
+                        if stage == "answer_ready":
+                            await _send_chunks(payload.get("answer", ""))
 
                 drain_task = asyncio.create_task(_drain_stage_queue())
                 try:

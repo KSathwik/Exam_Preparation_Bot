@@ -17,6 +17,7 @@ from typing import Callable, List, Optional
 from loguru import logger
 
 from app.core.config import settings
+from app.core.conversation_sessions import get_or_create_chat_session
 from app.models.db_models import ChatMessageRecord, ChatSession, ConversationMemory
 
 from ..models import ChatMessage, QueryType
@@ -97,13 +98,9 @@ class MemoryAgent:
 
         db = self.db_session_factory()
         try:
-            session_row = db.get(ChatSession, session_id)
-            if session_row is None:
-                session_row = ChatSession(id=session_id, device_id=device_id, title=_derive_title(query))
-                db.add(session_row)
-                db.flush()
-            elif device_id and not session_row.device_id:
-                session_row.device_id = device_id  # opportunistic backfill for older/partial rows
+            session_row = get_or_create_chat_session(
+                db, session_id, device_id=device_id, title=_derive_title(query)
+            )
 
             last_msg = (
                 db.query(ChatMessageRecord)

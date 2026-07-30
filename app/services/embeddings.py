@@ -279,6 +279,7 @@ class VectorStoreManager:
                 "file_name": chunk_metadata.file_name,
                 "page_number": 0,
                 "document_id": memory_id,
+                "session_id": session_id,
             }
         ]
         with self._index_lock:
@@ -350,6 +351,7 @@ class VectorStoreManager:
         top_k: int = None,
         content_types: Optional[List[str]] = None,
         document_ids: Optional[List[str]] = None,
+        session_ids: Optional[List[str]] = None,
     ) -> List[Tuple[dict, float, int]]:
         """Search the shared index. Defaults to ``["document"]`` so existing
         document-retrieval call sites never silently start mixing in memory
@@ -358,18 +360,22 @@ class VectorStoreManager:
         chunks from just those documents — used to scope retrieval to the
         material relevant to the current conversation instead of searching
         every document ever uploaded (which otherwise risks blending
-        unrelated documents into one answer)."""
+        unrelated documents into one answer). ``session_ids``, when given,
+        similarly restricts memory-tier chunks to just those conversations —
+        see ``add_memory`` — so one conversation's summarized facts can never
+        surface as a fallback answer inside a different conversation."""
         top_k = top_k or settings.retrieval_top_k
         content_types = ["document"] if content_types is None else content_types
         logger.debug(
             f"[SEARCH] query={query!r}  top_k={top_k}  content_types={content_types}  "
-            f"document_ids={document_ids}  index_size={self.vector_store.get_size()}"
+            f"document_ids={document_ids}  session_ids={session_ids}  index_size={self.vector_store.get_size()}"
         )
         query_embedding = self.embedding_gen.encode_single(query)
         with self._index_lock:
-            # content_type/document_id aren't part of the vector space, so
-            # filtering is post-hoc: over-fetch candidates from FAISS, then
-            # filter and re-rank in Python. Cheap at this project's scale.
+            # content_type/document_id/session_id aren't part of the vector
+            # space, so filtering is post-hoc: over-fetch candidates from
+            # FAISS, then filter and re-rank in Python. Cheap at this
+            # project's scale.
             fetch_k = min(self.vector_store.get_size(), max(top_k * 5, 50))
             candidates: List[Tuple[int, dict, float]] = []
             if fetch_k > 0:
@@ -382,6 +388,8 @@ class VectorStoreManager:
                     if chunk_content_type not in content_types:
                         continue
                     if document_ids is not None and chunk_info.get("document_id") not in document_ids:
+                        continue
+                    if session_ids is not None and chunk_info.get("session_id") not in session_ids:
                         continue
                     similarity = max(0.0, 1.0 - (distance / 2.0))
                     candidates.append((idx, chunk_info, similarity))

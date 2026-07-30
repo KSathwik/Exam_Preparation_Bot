@@ -204,6 +204,26 @@ def test_add_memory_tags_chunk_with_memory_content_type(manager):
     chunk = manager.vector_store.get_chunk_by_index(0)
     assert chunk["metadata"]["content_type"] == "memory"
     assert chunk["document_id"] == "mem-1"
+    assert chunk["session_id"] == "sess-1"
+
+
+def test_search_with_session_ids_filters_memory_to_that_conversation(manager):
+    manager.add_memory("Session 1 summary.", session_id="sess-1", memory_id="mem-1")
+    manager.add_memory("Session 2 summary.", session_id="sess-2", memory_id="mem-2")
+
+    results = manager.search("anything", top_k=5, content_types=["memory"], session_ids=["sess-1"])
+
+    assert len(results) == 1
+    assert results[0][0]["content"] == "Session 1 summary."
+
+
+def test_search_with_session_ids_excludes_other_conversations(manager):
+    manager.add_memory("Session 1 summary.", session_id="sess-1", memory_id="mem-1")
+    manager.add_memory("Session 2 summary.", session_id="sess-2", memory_id="mem-2")
+
+    results = manager.search("anything", top_k=5, content_types=["memory"], session_ids=["sess-3"])
+
+    assert results == []
 
 
 def test_search_defaults_to_documents_only(manager):

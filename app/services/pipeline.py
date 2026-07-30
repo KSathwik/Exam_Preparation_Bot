@@ -62,6 +62,7 @@ class ExamPrepBot:
             ),
             span_extractor=self.span_extractor,
             confidence_scorer=self.confidence_scorer,
+            db_session_factory=SessionLocal,
         )
 
     # ------------------------------------------------------------------

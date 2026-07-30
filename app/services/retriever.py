@@ -89,37 +89,44 @@ class AdaptiveRetriever:
         intent: QueryType,
         top_k: Optional[int] = None,
         document_ids: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
     ) -> Tuple[List[RetrievedChunk], bool]:
         if top_k is None:
             top_k = self._TOP_K_STRATEGY.get(intent, settings.retrieval_top_k)
 
-        if document_ids:
-            # Restrict the candidate pool up front to the document(s) the
-            # user actually uploaded in this conversation. Deliberately
-            # unconditional once any chunk exists there — NOT gated behind
-            # relevance_threshold like the global path below. A vague
-            # meta-question ("what's in this document?", "summarize this")
-            # often has weak raw embedding similarity to the document's own
-            # text (a meta-question doesn't share vocabulary with the
-            # content it's asking about), which would otherwise read as a
-            # "miss" and fall through to the full index — where a
-            # completely unrelated document can coincidentally score higher
-            # and win. That's the exact "confusing between different
-            # uploads" failure mode this scoping exists to prevent, so an
-            # explicit document scope is treated as authoritative: only an
-            # empty result set (the id has no indexed chunks at all, e.g. a
-            # deleted document) falls through to the full-index search.
-            scoped_raw = self.vector_store.search(query, top_k=top_k * 2, document_ids=document_ids)
+        if document_ids is not None:
+            # An explicit scope (even an empty one) is authoritative — see
+            # resolve_document_scope. Restricting the candidate pool up front
+            # to the document(s) that belong to this conversation is
+            # deliberately unconditional once any chunk exists there, NOT
+            # gated behind relevance_threshold like the unscoped path below.
+            # A vague meta-question ("what's in this document?", "summarize
+            # this") often has weak raw embedding similarity to the
+            # document's own text (a meta-question doesn't share vocabulary
+            # with the content it's asking about), which would otherwise read
+            # as a "miss". Unlike before, there is no fallback to the full
+            # index here: an empty or missed scoped search means "nothing
+            # relevant in this conversation," full stop — never a silent
+            # global search (see is_global_search_request for the explicit
+            # opt-in path instead).
+            scoped_raw = (
+                self.vector_store.search(query, top_k=top_k * 2, document_ids=document_ids)
+                if document_ids
+                else []
+            )
             if scoped_raw:
                 chunks, _ = self._score_results(query, scoped_raw, top_k)
                 logger.info(f"[RETRIEVAL] Scoped to document_ids={document_ids} — {len(chunks)} chunk(s)")
                 return chunks, True
-            logger.debug(f"[RETRIEVAL] No indexed chunks for document_ids={document_ids} — trying full index")
+            logger.debug(
+                f"[RETRIEVAL] No chunks for document_ids={document_ids} — trying conversation memory only"
+            )
+            return self._try_memory_fallback(query, top_k, session_id)
 
         raw_results = self.vector_store.search(query, top_k=top_k * 2)
         if not raw_results:
             logger.debug(f"No raw results for query: {query!r}")
-            return self._try_memory_fallback(query, top_k)
+            return self._try_memory_fallback(query, top_k, session_id)
 
         chunks, in_scope = self._score_results(query, raw_results, top_k)
 
@@ -129,14 +136,24 @@ class AdaptiveRetriever:
             # diluting citations; ConfidenceScorer assumes document-sourced
             # chunks), so this only ever replaces a would-be "nothing
             # relevant" result, never mixes with document chunks.
-            memory_chunks, memory_in_scope = self._try_memory_fallback(query, top_k)
+            memory_chunks, memory_in_scope = self._try_memory_fallback(query, top_k, session_id)
             if memory_in_scope:
                 return memory_chunks, True
 
         return chunks, in_scope
 
-    def _try_memory_fallback(self, query: str, top_k: int) -> Tuple[List[RetrievedChunk], bool]:
-        memory_results = self.vector_store.search(query, top_k=top_k, content_types=["memory"])
+    def _try_memory_fallback(
+        self, query: str, top_k: int, session_id: Optional[str] = None
+    ) -> Tuple[List[RetrievedChunk], bool]:
+        if not session_id:
+            # No conversation context to scope by — searching every
+            # conversation's summaries would be exactly the cross-session
+            # leak this scoping exists to prevent, so skip the fallback
+            # entirely rather than guess.
+            return [], False
+        memory_results = self.vector_store.search(
+            query, top_k=top_k, content_types=["memory"], session_ids=[session_id]
+        )
         if not memory_results:
             return [], False
 
@@ -185,8 +202,11 @@ class HybridRetriever:
         intent: QueryType,
         top_k: Optional[int] = None,
         document_ids: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
-        chunks, in_scope = self.adaptive.retrieve(query, intent, top_k, document_ids=document_ids)
+        chunks, in_scope = self.adaptive.retrieve(
+            query, intent, top_k, document_ids=document_ids, session_id=session_id
+        )
         relevance_score = chunks[0].relevance_score if chunks else 0.0
         # in_scope already reflects the full decision — including a semantic
         # memory hit replacing a missed document search — so is_relevant

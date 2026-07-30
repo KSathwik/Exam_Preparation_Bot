@@ -127,6 +127,49 @@ def test_upload_docx_happy_path(client):
     client.delete(f"/api/documents/{data['document_id']}")
 
 
+def test_upload_with_session_id_scopes_document_to_that_conversation(client):
+    resp = client.post(
+        "/api/documents/upload",
+        data={"session_id": "sess-doc-1", "device_id": "device-1"},
+        files={
+            "file": (
+                "notes.docx",
+                _make_docx_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    document_id = resp.json()["document_id"]
+
+    try:
+        scoped = client.get("/api/documents/list", params={"session_id": "sess-doc-1"})
+        assert document_id in [d["document_id"] for d in scoped.json()["documents"]]
+
+        other_session = client.get("/api/documents/list", params={"session_id": "some-other-session"})
+        assert document_id not in [d["document_id"] for d in other_session.json()["documents"]]
+    finally:
+        client.delete(f"/api/documents/{document_id}")
+
+
+def test_upload_without_session_id_still_works(client):
+    """session_id is optional — uploads with no conversation concept in play
+    keep working exactly as before, just unscoped (session_id=None)."""
+    resp = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "notes.docx",
+                _make_docx_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    document_id = resp.json()["document_id"]
+    client.delete(f"/api/documents/{document_id}")
+
+
 def test_delete_document_removes_file_and_vectors(client):
     upload_resp = client.post(
         "/api/documents/upload",

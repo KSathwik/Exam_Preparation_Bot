@@ -142,18 +142,18 @@ def test_history_roundtrip(client, mock_bot):
     assert mock_bot.chat_history == []
 
 
-def test_websocket_streams_stage_events_and_completes(client, mock_bot):
+def test_websocket_streams_only_the_final_answer_and_completes(client, mock_bot):
+    """Drafting and reflection both happen silently server-side (see
+    OrchestratorAgent.run) — the websocket client only ever sees an "intent"
+    event, "chunk" events for the final answer text, and "complete". No
+    status/stage messages about internal processing are ever sent."""
     mock_bot.intent_classifier.classify.return_value = IntentClassificationResult(
         query="What is X?", primary_intent=QueryType.DEFINITION, confidence=0.9
     )
 
     def fake_answer_question(query, session_id=None, device_id=None, document_ids=None, on_stage=None):
         if on_stage:
-            on_stage("retrieving", {})
-            on_stage("drafting", {})
-            on_stage("draft_ready", {"answer": "Draft answer text."})
-            on_stage("reflecting", {"message": "Reviewing the draft answer for accuracy..."})
-            on_stage("final_ready", {"answer": "Final answer text."})
+            on_stage("answer_ready", {"answer": "Final answer text."})
         return _fake_answer(text="Final answer text.")
 
     mock_bot.answer_question.side_effect = fake_answer_question
@@ -164,37 +164,13 @@ def test_websocket_streams_stage_events_and_completes(client, mock_bot):
         intent_msg = ws.receive_json()
         assert intent_msg["type"] == "intent"
 
-        retrieving_msg = ws.receive_json()
-        assert retrieving_msg == {
-            "type": "status",
-            "stage": "retrieving",
-            "message": "Searching your documents…",
-        }
-
-        drafting_msg = ws.receive_json()
-        assert drafting_msg == {"type": "status", "stage": "drafting", "message": "Drafting an answer…"}
-
-        # Stage order matches OrchestratorAgent.run: draft_ready fires before
-        # reflecting, so the draft chunk(s) arrive before the status message.
         msg = ws.receive_json()
-        draft_chunks = []
-        while msg["type"] == "chunk" and msg["stage"] == "draft":
-            draft_chunks.append(msg["text"])
+        chunks = []
+        while msg["type"] == "chunk":
+            assert set(msg.keys()) == {"type", "text"}  # no stage/status fields ever leak through
+            chunks.append(msg["text"])
             msg = ws.receive_json()
-        assert "".join(draft_chunks) == "Draft answer text."
-
-        assert msg == {
-            "type": "status",
-            "stage": "reflecting",
-            "message": "Reviewing the draft answer for accuracy...",
-        }
-
-        msg = ws.receive_json()
-        final_chunks = []
-        while msg["type"] == "chunk" and msg["stage"] == "final":
-            final_chunks.append(msg["text"])
-            msg = ws.receive_json()
-        assert "".join(final_chunks) == "Final answer text."
+        assert "".join(chunks) == "Final answer text."
 
         assert msg["type"] == "complete"
         assert msg["answer"] == "Final answer text."

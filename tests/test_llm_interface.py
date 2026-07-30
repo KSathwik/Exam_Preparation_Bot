@@ -135,75 +135,88 @@ def test_gemini_call_uses_client(monkeypatch):
     llm._client.models.generate_content.assert_called_once()
 
 
-def test_extract_claims_parses_chunk_indexed_json_array(monkeypatch):
+def test_generate_answer_with_claims_parses_json_object(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
     llm._call = MagicMock(
         return_value=(
-            "Some text before "
-            '[{"claim": "Claim one", "chunks": [1]}, {"claim": "Claim two", "chunks": [1, 2]}] trailing'
+            "Here you go: "
+            '{"answer": "Mitochondria produce ATP.", '
+            '"claims": [{"claim": "Mitochondria produce ATP.", "chunks": [1]}]} trailing'
         )
     )
 
-    claims = llm.extract_claims("An answer with two claims.", [_chunk(), _chunk(page=7)])
-    assert claims == [
-        {"claim": "Claim one", "chunks": [1]},
-        {"claim": "Claim two", "chunks": [1, 2]},
-    ]
+    result = llm.generate_answer_with_claims(
+        "What is a mitochondria?", [_chunk(), _chunk(page=7)], QueryType.DEFINITION
+    )
+
+    assert result == {
+        "answer": "Mitochondria produce ATP.",
+        "claims": [{"claim": "Mitochondria produce ATP.", "chunks": [1]}],
+    }
 
 
-def test_extract_claims_recovers_valid_objects_when_array_parse_fails(monkeypatch):
-    """A single malformed claim (e.g. the model didn't escape an embedded
-    quote mark) breaks whole-array json.loads — the other, individually
-    well-formed claim objects should still be recovered rather than
-    discarding the entire batch (regression found via live smoke testing)."""
+def test_generate_answer_with_claims_tolerates_plain_string_claims(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    llm = ClaudeInterface()
+    llm._call = MagicMock(return_value='{"answer": "The answer.", "claims": ["Claim one", "Claim two"]}')
+
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
+
+    assert result == {
+        "answer": "The answer.",
+        "claims": [{"claim": "Claim one", "chunks": []}, {"claim": "Claim two", "chunks": []}],
+    }
+
+
+def test_generate_answer_with_claims_recovers_answer_when_claims_malformed(monkeypatch):
+    """A malformed claims array (e.g. an unescaped quote mark the model
+    didn't escape) breaks whole-object json.loads — the answer field must
+    still be recovered rather than losing the turn entirely (regression
+    found via live smoke testing of the equivalent extract_claims failure)."""
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
     malformed = (
-        '[{"claim": "Earth is an "ocean world"", "chunks": [1]}, '
-        '{"claim": "Land covers 29.2% of the surface", "chunks": [1]}]'
+        '{"answer": "Earth has land and ocean.", '
+        '"claims": [{"claim": "Earth is an "ocean world"", "chunks": [1]}]}'
     )
     llm._call = MagicMock(return_value=malformed)
 
-    claims = llm.extract_claims("some answer", [_chunk()])
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
-    assert claims == [{"claim": "Land covers 29.2% of the surface", "chunks": [1]}]
+    assert result == {"answer": "Earth has land and ocean.", "claims": []}
 
 
-def test_extract_claims_tolerates_plain_string_array(monkeypatch):
+def test_generate_answer_with_claims_falls_back_to_raw_text(monkeypatch):
+    """When the response isn't JSON at all, the raw text is still used as
+    the answer rather than losing the turn entirely."""
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(return_value='["Claim one", "Claim two"]')
+    llm._call = MagicMock(return_value="Just a plain prose answer, no JSON at all.")
 
-    claims = llm.extract_claims("An answer with two claims.", [_chunk()])
-    assert claims == [
-        {"claim": "Claim one", "chunks": []},
-        {"claim": "Claim two", "chunks": []},
-    ]
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
-
-def test_extract_claims_returns_empty_on_malformed_response(monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "anthropic")
-    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
-    llm = ClaudeInterface()
-    llm._call = MagicMock(return_value="not json at all")
-
-    assert llm.extract_claims("anything", [_chunk()]) == []
+    assert result == {"answer": "Just a plain prose answer, no JSON at all.", "claims": []}
 
 
 def test_generate_structured_answer_maps_format_type(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm.generate_answer = MagicMock(return_value="The mitochondria is the powerhouse of the cell.")
-    llm.extract_claims = MagicMock(return_value=["The mitochondria is the powerhouse of the cell."])
+    llm.generate_answer_with_claims = MagicMock(
+        return_value={
+            "answer": "The mitochondria is the powerhouse of the cell.",
+            "claims": [{"claim": "The mitochondria is the powerhouse of the cell.", "chunks": [1]}],
+        }
+    )
 
     result = llm.generate_structured_answer("What is a mitochondria?", [_chunk()], QueryType.DEFINITION)
     assert result["format_type"] == "definition"
-    assert result["claims"] == ["The mitochondria is the powerhouse of the cell."]
+    assert result["claims"] == [{"claim": "The mitochondria is the powerhouse of the cell.", "chunks": [1]}]
     assert result["intent"] == "definition"
 
 
@@ -215,7 +228,8 @@ def test_reflect_on_answer_parses_json(monkeypatch):
         return_value=(
             "Here is my review: "
             '{"revised_answer": "Better answer.", "materially_changed": true, '
-            '"should_block": false, "issues_found": ["minor wording"]}'
+            '"should_block": false, "issues_found": ["minor wording"], '
+            '"claims": [{"claim": "Better answer.", "chunks": [1]}]}'
         )
     )
 
@@ -231,6 +245,7 @@ def test_reflect_on_answer_parses_json(monkeypatch):
         "materially_changed": True,
         "should_block": False,
         "issues_found": ["minor wording"],
+        "claims": [{"claim": "Better answer.", "chunks": [1]}],
     }
 
 
@@ -252,6 +267,7 @@ def test_reflect_on_answer_falls_back_on_malformed_response(monkeypatch):
         "materially_changed": False,
         "should_block": False,
         "issues_found": [],
+        "claims": None,
     }
 
 
@@ -273,6 +289,7 @@ def test_reflect_on_answer_falls_back_on_exception(monkeypatch):
         "materially_changed": False,
         "should_block": False,
         "issues_found": [],
+        "claims": None,
     }
 
 

@@ -23,5 +23,6 @@ class RetrievalAgent:
         intent: QueryType,
         top_k: Optional[int] = None,
         document_ids: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
-        return self.retriever.search(query, intent, top_k, document_ids=document_ids)
+        return self.retriever.search(query, intent, top_k, document_ids=document_ids, session_id=session_id)

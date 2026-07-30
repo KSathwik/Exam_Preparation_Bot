@@ -15,10 +15,11 @@ from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.api.documents import delete_document_record
 from app.core.database import get_db
 from app.core.dependencies import get_bot
 from app.core.security import require_api_key
-from app.models.db_models import ChatMessageRecord, ChatSession, ConversationMemory
+from app.models.db_models import ChatMessageRecord, ChatSession, ConversationMemory, DocumentRecord
 from app.models.schemas import (
     ChatMessageOut,
     ConversationDeleteResponse,
@@ -115,10 +116,16 @@ async def delete_conversation(session_id: str, db: Session = Depends(get_db)):
     # leaving orphaned vectors that would keep surfacing in future
     # semantic-memory search.
     embedded_memories = db.query(ConversationMemory).filter_by(session_id=session_id, embedded=True).all()
-    if embedded_memories:
+    documents = db.query(DocumentRecord).filter_by(session_id=session_id).all()
+    if embedded_memories or documents:
         bot = get_bot()
         for memory_row in embedded_memories:
             await run_in_threadpool(bot.vector_store_manager.remove_document, memory_row.id)
+        # Each chat is its own isolated notebook — deleting it deletes the
+        # document(s) that belonged only to it (vectors, uploaded file, and
+        # DB row), same cleanup as DELETE /documents/{document_id}.
+        for doc in documents:
+            await delete_document_record(db, bot, doc)
 
     # ORM-level delete (not a bulk .filter().delete()) — required for the
     # cascade="all, delete-orphan" relationships on messages/memories to fire.

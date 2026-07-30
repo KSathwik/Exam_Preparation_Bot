@@ -48,15 +48,20 @@ async function asJson(res) {
   return data;
 }
 
-export async function uploadDocument(file) {
+export async function uploadDocument(file, sessionId, deviceId) {
   const form = new FormData();
   form.append("file", file);
+  if (sessionId) form.append("session_id", sessionId);
+  if (deviceId) form.append("device_id", deviceId);
   const res = await fetch(`${API}/documents/upload`, { method: "POST", headers: authHeaders(), body: form });
   return asJson(res);
 }
 
-export async function listDocuments() {
-  const res = await fetch(`${API}/documents/list`, { headers: authHeaders() });
+export async function listDocuments(sessionId) {
+  const url = sessionId
+    ? `${API}/documents/list?session_id=${encodeURIComponent(sessionId)}`
+    : `${API}/documents/list`;
+  const res = await fetch(url, { headers: authHeaders() });
   return asJson(res);
 }
 

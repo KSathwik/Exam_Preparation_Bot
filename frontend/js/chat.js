@@ -9,7 +9,7 @@ import { renderMarkdown, escapeText, renderMathIn } from "./markdown.js";
 let messagesBox;
 let jumpBtn;
 let pinned = true;
-let current = null; // { ws, row, bubbleEl, metaEl, query, draftText, finalText, stage, settled }
+let current = null; // { ws, row, bubbleEl, metaEl, query, finalText, settled }
 
 export function initChat() {
   messagesBox = document.getElementById("messagesBox");
@@ -45,6 +45,32 @@ export function clearMessages() {
   if (current && current.ws) stopStreaming();
   messagesBox.innerHTML = "";
   pinned = true;
+}
+
+/* ── Empty state ───────────────────────────────────────────────────── */
+
+const EXAMPLE_PROMPTS = [
+  "Summarize this document in a few key points",
+  "What are the most important definitions I should know?",
+  "Walk me through this process step by step",
+  "Quiz me on the main ideas",
+];
+
+export function showEmptyStateIfNeeded() {
+  if (messagesBox.children.length > 0) return;
+  const wrap = document.createElement("div");
+  wrap.className = "empty-state";
+  wrap.innerHTML =
+    '<div class="empty-state-icon">✦</div>' +
+    "<h2>Ready when you are</h2>" +
+    "<p>Upload your study materials, then ask anything about them.</p>" +
+    '<div class="empty-state-chips">' +
+    EXAMPLE_PROMPTS.map((p) => `<button type="button" class="suggestion-chip">${escapeText(p)}</button>`).join("") +
+    "</div>";
+  wrap.querySelectorAll(".suggestion-chip").forEach((chip) => {
+    chip.addEventListener("click", () => sendQuery(chip.textContent));
+  });
+  messagesBox.appendChild(wrap);
 }
 
 /* ── Row builders ──────────────────────────────────────────────────── */
@@ -91,9 +117,12 @@ function buildUserRow(text) {
   wireCopyButton(copyBtn, () => text);
   const editBtn = actionButton("✎", "Edit");
   editBtn.addEventListener("click", () => {
+    if (state.streaming) return;
+    state.editingUserRow = row;
     const input = document.getElementById("queryInput");
     input.value = text;
     input.focus();
+    input.select();
     input.dispatchEvent(new Event("input"));
   });
   actions.append(copyBtn, editBtn);
@@ -228,6 +257,15 @@ export function renderHistory(messages) {
   reflectScroll();
 }
 
+export function showHistorySkeleton() {
+  clearMessages();
+  messagesBox.innerHTML =
+    '<div class="history-skeleton" aria-hidden="true">' +
+    '<div class="skeleton-row user"></div><div class="skeleton-row assistant"></div>' +
+    '<div class="skeleton-row user"></div><div class="skeleton-row assistant"></div>' +
+    "</div>";
+}
+
 export function addSystemMessage(text) {
   const row = document.createElement("div");
   row.className = "message-row system";
@@ -252,11 +290,13 @@ async function showNoMatchSuggestions(suggestionsEl) {
   // file can legitimately be uploaded more than once, producing separate
   // ids) so a chip click can scope retrieval to exactly the document it
   // names, not just mention the filename in freeform query text — a plain
-  // text mention doesn't reliably out-rank other documents in a global
-  // search (see the "confusing between uploads" fix).
+  // text mention doesn't reliably out-rank other documents in this
+  // conversation. Scoped to this conversation's own documents (server-side
+  // authoritative scope — see resolve_document_scope), never every document
+  // ever uploaded across every conversation.
   const byName = new Map();
   try {
-    const data = await listDocuments();
+    const data = await listDocuments(state.sessionId);
     for (const d of data.documents || []) {
       const name = cleanDocName(d.file_name);
       if (!byName.has(name)) byName.set(name, []);
@@ -327,10 +367,10 @@ export function stopStreaming() {
   } catch {
     /* ignore */
   }
-  if (!c.finalText && !c.draftText) {
+  if (!c.finalText) {
     c.bubble.textContent = "Stopped.";
   } else {
-    c.bubble.innerHTML = renderMarkdown(c.draftText || c.finalText) + '<div class="response-time">Stopped</div>';
+    c.bubble.innerHTML = renderMarkdown(c.finalText) + '<div class="response-time">Stopped</div>';
   }
   setComposerStreaming(false);
   current = null;
@@ -342,30 +382,51 @@ function regenerate(row) {
   sendQuery(query, { reuseRow: row });
 }
 
+/* Resets an existing assistant row back to a fresh "thinking" state so it
+   can be streamed into again in place — shared by Regenerate and
+   edit-and-resend, which both replace a row's content rather than
+   appending a new one. */
+function resetAssistantRowForStreaming(row, query) {
+  const bubble = row.querySelector(".message-bubble");
+  bubble.innerHTML = thinkingBubbleHtml();
+  const meta = row.querySelector(".message-meta");
+  meta.hidden = true;
+  meta.innerHTML = "";
+  const suggestions = row.querySelector(".message-suggestions");
+  suggestions.innerHTML = "";
+  const studyChips = row.querySelector(".study-chips");
+  studyChips.innerHTML = "";
+  const intentEl = row.querySelector(".message-intent");
+  intentEl.hidden = true;
+  row.dataset.query = query;
+  return { row, intentEl, bubble, meta, suggestions, studyChips };
+}
+
 export function sendQuery(text, opts) {
   const options = opts || {};
   const query = text.trim();
   if (!query || state.streaming) return;
 
+  const editRow = state.editingUserRow;
+  state.editingUserRow = null;
+
   if (!state.sessionId) {
     setSessionId(newConversationId());
   }
+
+  messagesBox.querySelector(".empty-state")?.remove();
   const isFirstMessage = messagesBox.children.length === 0;
 
   let built;
   if (options.reuseRow) {
-    const bubble = options.reuseRow.querySelector(".message-bubble");
-    bubble.innerHTML = thinkingBubbleHtml();
-    const meta = options.reuseRow.querySelector(".message-meta");
-    meta.hidden = true;
-    meta.innerHTML = "";
-    const suggestions = options.reuseRow.querySelector(".message-suggestions");
-    suggestions.innerHTML = "";
-    const studyChips = options.reuseRow.querySelector(".study-chips");
-    studyChips.innerHTML = "";
-    const intentEl = options.reuseRow.querySelector(".message-intent");
-    intentEl.hidden = true;
-    built = { row: options.reuseRow, intentEl, bubble, meta, suggestions, studyChips };
+    built = resetAssistantRowForStreaming(options.reuseRow, query);
+  } else if (editRow && editRow.isConnected && editRow.nextElementSibling?.dataset.role === "assistant") {
+    // Edit-and-resend: update the edited message in place and regenerate
+    // only its paired reply, matching ChatGPT/Claude's edit behavior —
+    // never append a duplicate of the old exchange below it.
+    editRow.dataset.text = query;
+    editRow.querySelector(".message-bubble").textContent = query;
+    built = resetAssistantRowForStreaming(editRow.nextElementSibling, query);
   } else {
     messagesBox.appendChild(buildUserRow(query));
     built = buildAssistantRow(query);
@@ -383,9 +444,7 @@ export function sendQuery(text, opts) {
     suggestions: built.suggestions,
     studyChips: built.studyChips,
     query,
-    draftText: "",
     finalText: "",
-    stage: null,
     settled: false,
     ws: null,
     timeoutId: null,
@@ -410,9 +469,8 @@ export function sendQuery(text, opts) {
     } catch {
       /* ignore */
     }
-    const shown = c.finalText || c.draftText;
     c.bubble.innerHTML =
-      (shown ? renderMarkdown(shown) : "") +
+      (c.finalText ? renderMarkdown(c.finalText) : "") +
       '<div class="response-time">Timed out — please try again.</div>';
     setComposerStreaming(false);
     current = null;
@@ -445,45 +503,19 @@ export function sendQuery(text, opts) {
       c.intentEl.hidden = false;
       const pct = data.confidence != null ? ` · ${Math.round(data.confidence * 100)}%` : "";
       c.intentEl.textContent = data.intent + pct;
-    } else if (data.type === "status" && (data.stage === "retrieving" || data.stage === "drafting")) {
-      // No chunks have started yet — update the thinking indicator's label
-      // in place instead of leaving the user staring at unlabeled dots
-      // during what can be a real 10-30s LLM call.
-      if (!c.stage) {
-        const label = c.bubble.querySelector(".thinking-label");
-        if (label) label.textContent = data.message;
-      }
-    } else if (data.type === "status" && data.stage === "reflecting") {
-      c.bubble.classList.add("answer-refining");
-      if (!c.row.querySelector(".reflecting-pill")) {
-        const pill = document.createElement("div");
-        pill.className = "reflecting-pill";
-        pill.textContent = data.message || "Reviewing answer…";
-        c.bubble.after(pill);
-      }
     } else if (data.type === "chunk") {
-      const pill = c.row.querySelector(".reflecting-pill");
-      if (data.stage === "final" && c.stage !== "final") {
-        c.stage = "final";
-        c.finalText = "";
-        c.bubble.classList.remove("answer-refining");
-        if (pill) pill.remove();
-      } else if (!c.stage) {
-        c.stage = "draft";
-      }
-      if (c.stage === "final") c.finalText += data.text;
-      else c.draftText += data.text;
-      const shown = c.stage === "final" ? c.finalText : c.draftText;
-      c.bubble.innerHTML = renderMarkdown(shown) + '<span class="stream-cursor" aria-hidden="true"></span>';
+      // The only stream that ever arrives is the final, already-reflected
+      // answer — drafting and reflection both happen silently server-side
+      // first (see OrchestratorAgent.run), so there's nothing to distinguish
+      // here and no risk of the shown text ever getting replaced mid-stream.
+      c.finalText += data.text;
+      c.bubble.innerHTML = renderMarkdown(c.finalText) + '<span class="stream-cursor" aria-hidden="true"></span>';
       reflectScroll();
     } else if (data.type === "complete") {
       c.settled = true;
       clearStreamTimeout(c);
-      const finalAnswer = data.answer ?? c.finalText ?? c.draftText;
+      const finalAnswer = data.answer ?? c.finalText;
       c.row.dataset.finalText = finalAnswer;
-      c.bubble.classList.remove("answer-refining");
-      const pill = c.row.querySelector(".reflecting-pill");
-      if (pill) pill.remove();
       c.bubble.innerHTML = renderMarkdown(finalAnswer);
       renderMathIn(c.bubble);
 
@@ -531,7 +563,7 @@ export function sendQuery(text, opts) {
     if (!c.settled) {
       c.settled = true;
       clearStreamTimeout(c);
-      c.bubble.textContent = c.draftText || c.finalText || "Error: connection closed unexpectedly";
+      c.bubble.textContent = c.finalText || "Error: connection closed unexpectedly";
       setComposerStreaming(false);
       current = null;
     }

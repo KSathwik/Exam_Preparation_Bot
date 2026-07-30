@@ -136,21 +136,49 @@ def test_retrieve_treats_weak_scoped_match_as_in_scope_without_falling_back():
     assert vs.search.call_count == 1
 
 
-def test_retrieve_falls_back_to_full_index_when_scoped_search_returns_nothing():
+def test_retrieve_missed_scoped_search_never_falls_back_to_full_index():
+    """Per the conversation-isolation redesign, a document scope that misses
+    must never silently search the full index — that was exactly how one
+    conversation's documents used to leak into another's answers. It falls
+    through only to this same conversation's memory (session-scoped), never
+    to unrelated documents."""
     vs = MagicMock()
 
-    def fake_search(query, top_k=None, content_types=None, document_ids=None):
+    def fake_search(query, top_k=None, content_types=None, document_ids=None, session_ids=None):
         if document_ids == ["doc-1"]:
             return []
-        return [_raw_result("Global chunk", 1, 0, 0.9, 1)]
+        if content_types == ["memory"]:
+            return [_memory_result("Recalled from this same conversation.", 0.9)]
+        return [_raw_result("A different conversation's document", 1, 0, 0.9, 1)]
 
     vs.search.side_effect = fake_search
     retriever = AdaptiveRetriever(vs)
 
-    chunks, in_scope = retriever.retrieve("What is X?", QueryType.DEFINITION, document_ids=["doc-1"])
+    chunks, in_scope = retriever.retrieve(
+        "What is X?", QueryType.DEFINITION, document_ids=["doc-1"], session_id="sess-1"
+    )
 
     assert in_scope is True
-    assert chunks[0].content == "Global chunk"
+    assert chunks[0].content == "Recalled from this same conversation."
+    # Scoped document search + session-scoped memory search only — the
+    # full/unscoped index is never queried.
+    assert vs.search.call_count == 2
+
+
+def test_retrieve_empty_document_scope_returns_nothing_without_querying():
+    """document_ids=[] (this conversation has zero documents) is distinct
+    from document_ids=None (no scope requested) — it must search nothing,
+    not fall back to a global search, and without a session_id there's no
+    conversation memory to fall back to either."""
+    vs = MagicMock()
+    vs.search.return_value = [_raw_result("Should never be returned", 1, 0, 0.9, 1)]
+    retriever = AdaptiveRetriever(vs)
+
+    chunks, in_scope = retriever.retrieve("What is X?", QueryType.DEFINITION, document_ids=[])
+
+    assert chunks == []
+    assert in_scope is False
+    vs.search.assert_not_called()
 
 
 def test_retrieve_without_document_ids_only_searches_once(mock_vector_store):
@@ -242,7 +270,28 @@ def test_cross_encoder_rerank_skipped_for_single_chunk(mock_vector_store, monkey
 def test_memory_fallback_used_when_document_retrieval_out_of_scope():
     vs = MagicMock()
 
-    def fake_search(query, top_k=None, content_types=None):
+    def fake_search(query, top_k=None, content_types=None, session_ids=None):
+        if content_types == ["memory"]:
+            return [_memory_result("We discussed photosynthesis last time.", 0.8)]
+        return [_raw_result("Barely related", 1, 0, 0.01, 1)]
+
+    vs.search.side_effect = fake_search
+    retriever = AdaptiveRetriever(vs)
+
+    chunks, in_scope = retriever.retrieve("what did we discuss?", QueryType.VAGUE, session_id="sess-1")
+
+    assert in_scope is True
+    assert chunks[0].content == "We discussed photosynthesis last time."
+
+
+def test_memory_fallback_not_used_without_session_id():
+    """No session_id means no conversation to scope memory by — searching
+    every conversation's summaries would be exactly the cross-session leak
+    this scoping exists to prevent, so the fallback is skipped entirely
+    rather than guessing."""
+    vs = MagicMock()
+
+    def fake_search(query, top_k=None, content_types=None, session_ids=None):
         if content_types == ["memory"]:
             return [_memory_result("We discussed photosynthesis last time.", 0.8)]
         return [_raw_result("Barely related", 1, 0, 0.01, 1)]
@@ -252,8 +301,8 @@ def test_memory_fallback_used_when_document_retrieval_out_of_scope():
 
     chunks, in_scope = retriever.retrieve("what did we discuss?", QueryType.VAGUE)
 
-    assert in_scope is True
-    assert chunks[0].content == "We discussed photosynthesis last time."
+    assert in_scope is False
+    assert chunks[0].content == "Barely related"
 
 
 def test_memory_fallback_not_used_when_document_retrieval_in_scope(mock_vector_store):
@@ -271,7 +320,7 @@ def test_memory_fallback_not_used_when_document_retrieval_in_scope(mock_vector_s
 def test_memory_fallback_below_threshold_stays_out_of_scope():
     vs = MagicMock()
 
-    def fake_search(query, top_k=None, content_types=None):
+    def fake_search(query, top_k=None, content_types=None, session_ids=None):
         if content_types == ["memory"]:
             return [_memory_result("Weak memory match.", 0.1)]
         return [_raw_result("Barely related", 1, 0, 0.01, 1)]
@@ -279,7 +328,7 @@ def test_memory_fallback_below_threshold_stays_out_of_scope():
     vs.search.side_effect = fake_search
     retriever = AdaptiveRetriever(vs)
 
-    chunks, in_scope = retriever.retrieve("unrelated", QueryType.VAGUE)
+    chunks, in_scope = retriever.retrieve("unrelated", QueryType.VAGUE, session_id="sess-1")
 
     assert in_scope is False
     assert chunks[0].content == "Barely related"
@@ -288,7 +337,7 @@ def test_memory_fallback_below_threshold_stays_out_of_scope():
 def test_memory_fallback_when_document_retrieval_returns_no_results():
     vs = MagicMock()
 
-    def fake_search(query, top_k=None, content_types=None):
+    def fake_search(query, top_k=None, content_types=None, session_ids=None):
         if content_types == ["memory"]:
             return [_memory_result("Recalled from a past session.", 0.9)]
         return []
@@ -296,7 +345,7 @@ def test_memory_fallback_when_document_retrieval_returns_no_results():
     vs.search.side_effect = fake_search
     retriever = AdaptiveRetriever(vs)
 
-    chunks, in_scope = retriever.retrieve("anything", QueryType.VAGUE)
+    chunks, in_scope = retriever.retrieve("anything", QueryType.VAGUE, session_id="sess-1")
 
     assert in_scope is True
     assert chunks[0].content == "Recalled from a past session."
@@ -305,7 +354,7 @@ def test_memory_fallback_when_document_retrieval_returns_no_results():
 def test_hybrid_retriever_is_relevant_reflects_memory_fallback():
     vs = MagicMock()
 
-    def fake_search(query, top_k=None, content_types=None):
+    def fake_search(query, top_k=None, content_types=None, session_ids=None):
         if content_types == ["memory"]:
             return [_memory_result("We discussed photosynthesis last time.", 0.8)]
         return [_raw_result("Barely related", 1, 0, 0.01, 1)]
@@ -313,7 +362,7 @@ def test_hybrid_retriever_is_relevant_reflects_memory_fallback():
     vs.search.side_effect = fake_search
     hybrid = HybridRetriever(vs)
 
-    result = hybrid.search("what did we discuss?", QueryType.VAGUE)
+    result = hybrid.search("what did we discuss?", QueryType.VAGUE, session_id="sess-1")
 
     assert result["is_relevant"] is True
     assert result["in_scope"] is True

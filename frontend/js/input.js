@@ -35,6 +35,9 @@ export function initInput() {
   input.addEventListener("input", () => {
     autoGrow();
     updateCharCount();
+    // Cleared without sending — no longer editing that message (see chat.js
+    // sendQuery), so a fresh unrelated question doesn't get misapplied to it.
+    if (!input.value) state.editingUserRow = null;
   });
 
   input.addEventListener("keydown", (e) => {
@@ -83,7 +86,7 @@ export function initInput() {
 async function handleUpload(file) {
   addSystemMessage(`Uploading ${file.name}…`);
   try {
-    const data = await uploadDocument(file);
+    const data = await uploadDocument(file, state.sessionId, state.deviceId);
     if (data.success) {
       addDocumentId(data.document_id);
       addSystemMessage(`✓ ${data.message}`);

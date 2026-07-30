@@ -25,6 +25,18 @@ class DocumentRecord(Base):
     file_size_mb = Column(Float, nullable=False)
     total_chunks = Column(Integer, nullable=False, default=0)
     upload_path = Column(String(512), nullable=True)
+    # Which conversation this document was uploaded into — the authoritative
+    # scope retrieval uses to keep one conversation's documents from leaking
+    # into another's answers (see AdaptiveRetriever.retrieve /
+    # resolve_document_scope). Nullable: documents uploaded before this
+    # column existed have no known conversation and are only reachable via an
+    # explicit global search. Deliberately not a ForeignKey: ChatSession
+    # already has a document_id -> documents.id FK (see below), and a real FK
+    # back from documents -> chat_sessions would form the same
+    # mutually-dependent-tables cycle SQLite cannot create/migrate cleanly
+    # that last_summarized_message_id avoids below — enforced at the
+    # application layer only (see get_or_create_chat_session).
+    session_id = Column(String(36), nullable=True, index=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
 
     queries = relationship("QueryRecord", back_populates="document", cascade="all, delete-orphan")

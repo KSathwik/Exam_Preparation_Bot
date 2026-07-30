@@ -3,18 +3,21 @@
    fixed composer) + a settings <dialog>. No right-side panel anywhere. */
 
 :root{
-  --color-bg:#eef1f8;
+  --color-bg:#f2f3fb;
   --color-surface:#ffffff;
-  --color-surface-alt:#f6f7fb;
-  --color-border:#e2e5ee;
-  --color-text:#1c1f2e;
-  --color-text-muted:#6b7080;
-  --color-text-faint:#9497a6;
+  --color-surface-alt:#f5f6fd;
+  --color-border:#e1e3f0;
+  --color-text:#191a2e;
+  --color-text-muted:#63677e;
+  --color-text-faint:#9296ac;
 
-  --color-primary:#5b5bf0;
-  --color-primary-hover:#4747d6;
-  --color-primary-soft:#eef0ff;
+  --color-primary:#4f46e5;
+  --color-primary-hover:#4338ca;
+  --color-primary-soft:#ece9fd;
   --color-primary-contrast:#ffffff;
+  --color-primary-2:#8b5cf6;
+  --gradient-primary:linear-gradient(135deg,var(--color-primary),var(--color-primary-2));
+  --gradient-primary-soft:linear-gradient(135deg,var(--color-primary-soft),var(--color-surface-alt));
 
   --color-success-bg:#e3f7ec;
   --color-success-fg:#12693f;
@@ -43,6 +46,7 @@
   --shadow-sm:0 1px 2px rgba(20,22,40,.06);
   --shadow-md:0 4px 16px rgba(20,22,40,.08);
   --shadow-lg:0 12px 32px rgba(20,22,40,.12);
+  --shadow-glow:0 4px 20px rgba(79,70,229,.28);
   --transition-fast:.15s ease;
   --transition-base:.25s ease;
 
@@ -58,18 +62,21 @@
    OS live. */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme]){
-    --color-bg:#14151f;
-    --color-surface:#1c1e2b;
-    --color-surface-alt:#232537;
-    --color-border:#31344a;
-    --color-text:#eceefb;
-    --color-text-muted:#a4a8c0;
-    --color-text-faint:#7a7e97;
+    --color-bg:#0f101c;
+    --color-surface:#1a1c2c;
+    --color-surface-alt:#22243a;
+    --color-border:#2f3350;
+    --color-text:#f0f1fc;
+    --color-text-muted:#a8acc8;
+    --color-text-faint:#7d81a3;
 
-    --color-primary:#8c8cf9;
-    --color-primary-hover:#a3a3fb;
-    --color-primary-soft:#2a2b52;
-    --color-primary-contrast:#14151f;
+    --color-primary:#8b7ffb;
+    --color-primary-hover:#a39bfd;
+    --color-primary-soft:#2c2b58;
+    --color-primary-contrast:#0f101c;
+    --color-primary-2:#c084fc;
+    --gradient-primary:linear-gradient(135deg,var(--color-primary),var(--color-primary-2));
+    --gradient-primary-soft:linear-gradient(135deg,var(--color-primary-soft),var(--color-surface-alt));
 
     --color-success-bg:#123527;
     --color-success-fg:#6fdba3;
@@ -84,21 +91,25 @@
     --shadow-sm:0 1px 2px rgba(0,0,0,.3);
     --shadow-md:0 4px 16px rgba(0,0,0,.35);
     --shadow-lg:0 12px 32px rgba(0,0,0,.45);
+    --shadow-glow:0 4px 24px rgba(139,127,251,.35);
   }
 }
 
 :root[data-theme="dark"]{
-  --color-bg:#14151f;
-  --color-surface:#1c1e2b;
-  --color-surface-alt:#232537;
-  --color-border:#31344a;
-  --color-text:#eceefb;
-  --color-text-muted:#a4a8c0;
-  --color-text-faint:#7a7e97;
-  --color-primary:#8c8cf9;
-  --color-primary-hover:#a3a3fb;
-  --color-primary-soft:#2a2b52;
-  --color-primary-contrast:#14151f;
+  --color-bg:#0f101c;
+  --color-surface:#1a1c2c;
+  --color-surface-alt:#22243a;
+  --color-border:#2f3350;
+  --color-text:#f0f1fc;
+  --color-text-muted:#a8acc8;
+  --color-text-faint:#7d81a3;
+  --color-primary:#8b7ffb;
+  --color-primary-hover:#a39bfd;
+  --color-primary-soft:#2c2b58;
+  --color-primary-contrast:#0f101c;
+  --color-primary-2:#c084fc;
+  --gradient-primary:linear-gradient(135deg,var(--color-primary),var(--color-primary-2));
+  --gradient-primary-soft:linear-gradient(135deg,var(--color-primary-soft),var(--color-surface-alt));
   --color-success-bg:#123527;
   --color-success-fg:#6fdba3;
   --color-success-border:#1f5a3d;
@@ -111,20 +122,24 @@
   --shadow-sm:0 1px 2px rgba(0,0,0,.3);
   --shadow-md:0 4px 16px rgba(0,0,0,.35);
   --shadow-lg:0 12px 32px rgba(0,0,0,.45);
+  --shadow-glow:0 4px 24px rgba(139,127,251,.35);
 }
 
 :root[data-theme="light"]{
-  --color-bg:#eef1f8;
+  --color-bg:#f2f3fb;
   --color-surface:#ffffff;
-  --color-surface-alt:#f6f7fb;
-  --color-border:#e2e5ee;
-  --color-text:#1c1f2e;
-  --color-text-muted:#6b7080;
-  --color-text-faint:#9497a6;
-  --color-primary:#5b5bf0;
-  --color-primary-hover:#4747d6;
-  --color-primary-soft:#eef0ff;
+  --color-surface-alt:#f5f6fd;
+  --color-border:#e1e3f0;
+  --color-text:#191a2e;
+  --color-text-muted:#63677e;
+  --color-text-faint:#9296ac;
+  --color-primary:#4f46e5;
+  --color-primary-hover:#4338ca;
+  --color-primary-soft:#ece9fd;
   --color-primary-contrast:#ffffff;
+  --color-primary-2:#8b5cf6;
+  --gradient-primary:linear-gradient(135deg,var(--color-primary),var(--color-primary-2));
+  --gradient-primary-soft:linear-gradient(135deg,var(--color-primary-soft),var(--color-surface-alt));
   --color-success-bg:#e3f7ec;
   --color-success-fg:#12693f;
   --color-success-border:#bfe9d2;
@@ -137,6 +152,7 @@
   --shadow-sm:0 1px 2px rgba(20,22,40,.06);
   --shadow-md:0 4px 16px rgba(20,22,40,.08);
   --shadow-lg:0 12px 32px rgba(20,22,40,.12);
+  --shadow-glow:0 4px 20px rgba(79,70,229,.28);
 }
 
 *{margin:0;padding:0;box-sizing:border-box}
@@ -144,7 +160,11 @@
 html,body{height:100%}
 body{
   font-family:var(--font-sans);
-  background:var(--color-bg);
+  /* A very subtle top-corner wash over the flat background — enough to add
+     depth on close inspection without competing with message content. */
+  background:
+    radial-gradient(1200px 600px at 15% -10%,var(--color-primary-soft) 0%,transparent 60%),
+    var(--color-bg);
   color:var(--color-text);
   font-size:15px;
   line-height:1.5;
@@ -203,9 +223,10 @@ button:focus-visible,
 }
 .sidebar-header .logo-mark{
   width:26px;height:26px;border-radius:var(--radius-sm);
-  background:var(--color-primary);color:#fff;
+  background:var(--gradient-primary);color:#fff;
   display:flex;align-items:center;justify-content:center;
   font-size:14px;font-weight:800;flex-shrink:0;
+  box-shadow:0 2px 8px rgba(79,70,229,.35);
 }
 
 .new-chat-btn{
@@ -217,9 +238,13 @@ button:focus-visible,
   border-radius:var(--radius-md);
   font-weight:600;font-size:14px;
   cursor:pointer;
-  transition:background var(--transition-fast),border-color var(--transition-fast);
+  transition:background var(--transition-fast),border-color var(--transition-fast),
+    transform var(--transition-fast),box-shadow var(--transition-fast);
 }
-.new-chat-btn:hover{background:var(--color-primary-soft);border-color:var(--color-primary)}
+.new-chat-btn:hover{
+  background:var(--gradient-primary-soft);border-color:var(--color-primary);
+  transform:translateY(-1px);box-shadow:var(--shadow-sm);
+}
 .new-chat-btn:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 
 .sidebar-search{padding:0 var(--space-3) var(--space-2)}
@@ -266,7 +291,7 @@ button:focus-visible,
   transition:background var(--transition-fast);
 }
 .conversation-item:hover{background:var(--color-border)}
-.conversation-item.active{background:var(--color-primary-soft);color:var(--color-primary)}
+.conversation-item.active{background:var(--gradient-primary-soft);color:var(--color-primary);font-weight:600}
 .conversation-item .conversation-title{
   flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -363,13 +388,26 @@ button:focus-visible,
   padding:var(--space-5) var(--space-4);
   scroll-behavior:smooth;
 }
-.messages-box:empty::before{
-  content:"Ask a question about your uploaded materials to get started.";
+/* Rich empty state (real DOM, not a CSS placeholder) — shown on a brand new
+   or freshly-cleared conversation, replaced the instant a real message is
+   sent (see chat.js). */
+.empty-state{
+  height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:var(--space-2);text-align:center;
+  max-width:var(--chat-max-width);margin:0 auto;padding:var(--space-4);
+}
+.empty-state-icon{
+  width:48px;height:48px;border-radius:var(--radius-lg);
+  background:var(--gradient-primary);color:#fff;
   display:flex;align-items:center;justify-content:center;
-  height:100%;
-  color:var(--color-text-faint);
-  font-size:15px;text-align:center;
-  max-width:var(--chat-max-width);margin:0 auto;
+  font-size:22px;margin-bottom:var(--space-2);
+  box-shadow:var(--shadow-glow);
+}
+.empty-state h2{font-size:19px;font-weight:700;letter-spacing:-.01em}
+.empty-state p{color:var(--color-text-muted);font-size:14px;max-width:36em}
+.empty-state-chips{
+  display:flex;flex-wrap:wrap;justify-content:center;gap:var(--space-2);
+  margin-top:var(--space-3);
 }
 
 .message-row{
@@ -383,7 +421,7 @@ button:focus-visible,
 .message-row.assistant{display:block}
 
 .message-row.user .message-bubble{
-  background:var(--color-primary-soft);
+  background:var(--gradient-primary-soft);
   color:var(--color-text);
   border-radius:var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
   padding:10px 16px;
@@ -397,24 +435,23 @@ button:focus-visible,
 }
 .message-row.assistant .message-bubble > *:not(:last-child){margin-bottom:var(--space-3)}
 
+/* Loading skeleton shown the instant a conversation is clicked, replacing
+   the previous conversation's stale messages while its history loads. */
+.history-skeleton{display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-2) 0}
+.skeleton-row{
+  height:44px;border-radius:var(--radius-lg);
+  background:var(--color-surface-alt);
+  animation:skeletonPulse 1.4s ease-in-out infinite;
+}
+.skeleton-row.user{align-self:flex-end;width:45%}
+.skeleton-row.assistant{align-self:flex-start;width:70%}
+@keyframes skeletonPulse{0%,100%{opacity:.5}50%{opacity:1}}
+
 .message-intent{
   font-size:11px;font-weight:600;color:var(--color-text-faint);
   text-transform:uppercase;letter-spacing:.04em;
   margin-bottom:var(--space-1);
 }
-
-/* Reflection: draft dims + a small pill while the second pass runs, then the
-   (possibly revised) final text fades in — never a hard cut to blank. */
-.message-bubble.answer-refining{opacity:.35;transition:opacity var(--transition-base)}
-.reflecting-pill{
-  display:inline-flex;align-items:center;gap:6px;
-  margin-top:var(--space-2);
-  padding:4px 10px;border-radius:var(--radius-pill);
-  background:var(--color-info-bg);color:var(--color-info-fg);
-  font-size:12px;font-weight:600;
-  animation:pulseOpacity 1.4s ease-in-out infinite;
-}
-@keyframes pulseOpacity{0%,100%{opacity:1}50%{opacity:.55}}
 
 .stream-cursor{
   display:inline-block;width:2px;height:1em;
@@ -424,9 +461,9 @@ button:focus-visible,
 }
 @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
 
-/* Thinking indicator: 3 dots + a status label that starts as "Thinking…"
-   and gets updated in place as retrieving/drafting status events arrive —
-   real LLM calls here can take 10-30s, so silence read as "broken." */
+/* Thinking indicator: 3 dots + a "Thinking…" label shown while drafting and
+   reflection both happen silently server-side — real LLM calls here can
+   take several seconds, so silence would read as "broken." */
 .thinking-dots{display:inline-flex;gap:4px;padding:6px 0;vertical-align:middle}
 .thinking-dots span{
   width:6px;height:6px;border-radius:50%;
@@ -498,9 +535,13 @@ button:focus-visible,
   border:1px solid var(--color-border);background:var(--color-surface);
   color:var(--color-primary);font-size:13px;font-weight:600;font-family:inherit;
   cursor:pointer;
-  transition:background var(--transition-fast),border-color var(--transition-fast);
+  transition:background var(--transition-fast),border-color var(--transition-fast),
+    transform var(--transition-fast),box-shadow var(--transition-fast);
 }
-.suggestion-chip:hover{background:var(--color-primary-soft);border-color:var(--color-primary)}
+.suggestion-chip:hover{
+  background:var(--gradient-primary-soft);border-color:var(--color-primary);
+  transform:translateY(-1px);box-shadow:var(--shadow-sm);
+}
 .suggestion-chip:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 
 /* Contextual study-tool chips — only ever shown under the most recent
@@ -576,7 +617,7 @@ button:focus-visible,
 }
 .composer-inner:focus-within{
   border-color:var(--color-primary);
-  box-shadow:0 0 0 3px var(--color-primary-soft);
+  box-shadow:0 0 0 3px var(--color-primary-soft),var(--shadow-sm);
 }
 #queryInput{
   flex:1;resize:none;overflow-y:auto;
@@ -601,9 +642,9 @@ button:focus-visible,
 .composer-icon-btn:hover{background:var(--color-surface-alt);color:var(--color-text)}
 .composer-icon-btn:disabled{opacity:.4;cursor:not-allowed}
 .composer-icon-btn:disabled:hover{background:none;color:var(--color-text-muted)}
-#sendBtn{background:var(--color-primary);color:#fff}
-#sendBtn:hover{background:var(--color-primary-hover)}
-#sendBtn:disabled{background:var(--color-border);color:var(--color-text-faint);cursor:not-allowed}
+#sendBtn{background:var(--gradient-primary);color:#fff;transition:box-shadow var(--transition-fast),transform var(--transition-fast)}
+#sendBtn:hover{box-shadow:var(--shadow-glow);transform:translateY(-1px)}
+#sendBtn:disabled{background:var(--color-border);color:var(--color-text-faint);cursor:not-allowed;box-shadow:none;transform:none}
 #sendBtn.stopping{background:var(--color-error-fg)}
 
 /* Drag-and-drop overlay across the whole chat column */
@@ -667,11 +708,24 @@ dialog#settingsModal::backdrop{background:rgba(10,11,20,.45)}
 .btn{
   padding:8px 16px;border:none;border-radius:var(--radius-md);
   cursor:pointer;font-weight:600;font-size:13px;font-family:inherit;
-  transition:background var(--transition-fast),transform var(--transition-fast);
+  transition:background var(--transition-fast),transform var(--transition-fast),box-shadow var(--transition-fast);
 }
-.btn-primary{background:var(--color-primary);color:#fff}
-.btn-primary:hover{background:var(--color-primary-hover)}
+.btn-primary{background:var(--gradient-primary);color:#fff}
+.btn-primary:hover{box-shadow:var(--shadow-glow);transform:translateY(-1px)}
 .btn:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
+
+/* ── Scrollbars & selection ────────────────────────────────────────── */
+
+::selection{background:var(--color-primary-soft);color:var(--color-text)}
+
+.conversation-list,.messages-box,#queryInput{scrollbar-width:thin;scrollbar-color:var(--color-border) transparent}
+.conversation-list::-webkit-scrollbar,.messages-box::-webkit-scrollbar,#queryInput::-webkit-scrollbar{width:8px}
+.conversation-list::-webkit-scrollbar-thumb,.messages-box::-webkit-scrollbar-thumb,#queryInput::-webkit-scrollbar-thumb{
+  background:var(--color-border);border-radius:var(--radius-pill);border:2px solid transparent;background-clip:padding-box;
+}
+.conversation-list::-webkit-scrollbar-thumb:hover,.messages-box::-webkit-scrollbar-thumb:hover,#queryInput::-webkit-scrollbar-thumb:hover{
+  background:var(--color-text-faint);background-clip:padding-box;
+}
 
 /* ── Misc ──────────────────────────────────────────────────────────── */
 

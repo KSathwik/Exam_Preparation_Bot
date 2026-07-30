@@ -4,13 +4,15 @@ import time as _time
 import uuid
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.conversation_sessions import get_or_create_chat_session
 from app.core.database import get_db
 from app.core.dependencies import get_bot
 from app.core.security import require_api_key
@@ -70,10 +72,14 @@ def _safe_upload_path(raw_filename: str | None, document_id: str) -> Path:
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    device_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     start = _time.time()
-    logger.info(f"[UPLOAD] Received file: {file.filename}  content_type={file.content_type}")
+    logger.info(
+        f"[UPLOAD] Received file: {file.filename}  content_type={file.content_type}  session_id={session_id}"
+    )
 
     ext = Path(file.filename or "").suffix.lower().lstrip(".")
     if ext not in _ALLOWED:
@@ -103,6 +109,13 @@ async def upload_document(
         await run_in_threadpool(bot.vector_store_manager.add_document, document, document_id)
         logger.info(f"[UPLOAD] Embedded & indexed: embed_time={_time.time()-t0:.2f}s")
 
+        if session_id:
+            # Links this document to its conversation so retrieval can scope
+            # to it later (see resolve_document_scope) — get-or-create since
+            # a document can be uploaded before any chat message has created
+            # the ChatSession row.
+            get_or_create_chat_session(db, session_id, device_id=device_id)
+
         record = DocumentRecord(
             id=document_id,
             file_name=document.file_name,
@@ -110,10 +123,11 @@ async def upload_document(
             file_size_mb=file_size_mb,
             total_chunks=document.total_chunks,
             upload_path=str(save_path),
+            session_id=session_id,
         )
         db.add(record)
         db.commit()
-        logger.info(f"[UPLOAD] DB record saved: id={document_id}")
+        logger.info(f"[UPLOAD] DB record saved: id={document_id}  session_id={session_id}")
 
         total_time = _time.time() - start
         logger.info(
@@ -141,8 +155,11 @@ async def upload_document(
 
 
 @router.get("/list")
-async def list_documents(db: Session = Depends(get_db)):
-    docs = db.query(DocumentRecord).order_by(DocumentRecord.created_at.desc()).all()
+async def list_documents(session_id: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(DocumentRecord)
+    if session_id is not None:
+        query = query.filter(DocumentRecord.session_id == session_id)
+    docs = query.order_by(DocumentRecord.created_at.desc()).all()
     return {
         "success": True,
         "total_documents": len(docs),
@@ -160,14 +177,16 @@ async def list_documents(db: Session = Depends(get_db)):
     }
 
 
-@router.delete("/{document_id}")
-async def delete_document(document_id: str, db: Session = Depends(get_db)):
-    doc = db.query(DocumentRecord).filter(DocumentRecord.id == document_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+async def delete_document_record(db: Session, bot, doc: DocumentRecord) -> dict:
+    """Remove a document's FAISS vectors, uploaded file, and DB row.
 
-    bot = get_bot()
-    removed_vectors = await run_in_threadpool(bot.vector_store_manager.remove_document, document_id)
+    Shared by the ``/{document_id}`` delete route below and
+    ``app.api.conversations.delete_conversation``'s cascade to a
+    conversation's own documents — one implementation instead of two copies
+    of the same cleanup. Does not commit; the caller decides the transaction
+    boundary (e.g. batching several documents into one commit).
+    """
+    removed_vectors = await run_in_threadpool(bot.vector_store_manager.remove_document, doc.id)
 
     file_removed = False
     if doc.upload_path:
@@ -176,14 +195,26 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
         upload_path.unlink(missing_ok=True)
 
     db.delete(doc)
+    return {"removed_vectors": removed_vectors, "file_removed": file_removed}
+
+
+@router.delete("/{document_id}")
+async def delete_document(document_id: str, db: Session = Depends(get_db)):
+    doc = db.query(DocumentRecord).filter(DocumentRecord.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    bot = get_bot()
+    result = await delete_document_record(db, bot, doc)
     db.commit()
     logger.info(
-        f"[DELETE] document_id={document_id}  removed_vectors={removed_vectors}  file_removed={file_removed}"
+        f"[DELETE] document_id={document_id}  removed_vectors={result['removed_vectors']}  "
+        f"file_removed={result['file_removed']}"
     )
     return {
         "success": True,
         "message": f"Document {document_id} deleted",
-        "removed_vectors": removed_vectors,
+        "removed_vectors": result["removed_vectors"],
     }
 
 

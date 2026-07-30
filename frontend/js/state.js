@@ -24,12 +24,19 @@ export const state = {
   ws: null,
   streaming: false,
   conversations: [],
-  // Documents uploaded during this conversation (in-memory only, not
-  // persisted — there's no document-to-conversation link in the DB yet).
-  // Sent with every question so retrieval prefers what was actually
-  // uploaded here instead of searching every document ever uploaded,
-  // which risks blending unrelated documents into one answer.
+  // Optional narrowing hint only — the server resolves the conversation's
+  // real document set from the DB (documents.session_id, set at upload
+  // time) as the authoritative scope, so losing this on reload/tab-switch
+  // is safe. Populated on upload and by suggestion-chip clicks to narrow a
+  // question to one specific document among possibly several uploaded in
+  // this same conversation; never used to *expand* scope beyond it.
   documentIds: [],
+  // Set by clicking Edit on a past user message; read (and cleared) by the
+  // next sendQuery() call so it regenerates that message+reply pair in
+  // place instead of appending a new one. Never persisted — reset if the
+  // composer is cleared without sending (see input.js) or the row is no
+  // longer in the DOM (conversation switched/cleared).
+  editingUserRow: null,
 };
 
 export function addDocumentId(id) {

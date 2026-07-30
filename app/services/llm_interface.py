@@ -40,13 +40,41 @@ class _BaseLLM(ABC):
     @abstractmethod
     def _call(self, system_prompt: str, user_message: str, max_tokens: int | None = None) -> str: ...
 
-    def generate_answer(self, query: str, retrieved_chunks: List[RetrievedChunk], intent: QueryType) -> str:
-        system_prompt = self.intent_classifier.get_classification_prompt(intent)
+    def generate_answer_with_claims(
+        self, query: str, retrieved_chunks: List[RetrievedChunk], intent: QueryType
+    ) -> dict:
+        """Draft an answer AND trace its factual claims back to the numbered
+        excerpt(s) (``[1]``, ``[3]``, ...) they were drawn from, in a single
+        call — merged from two separate calls (draft, then a dedicated
+        claim-extraction pass) to cut a full LLM round trip off every turn's
+        time-to-first-token. ``claims`` feeds `SpanExtractor.extract_supporting_span`
+        so it can search only the LLM-indicated chunks instead of fuzzy-matching
+        blindly across all of them.
+
+        Returns ``{"answer": str, "claims": [{"claim": str, "chunks": [int, ...]}, ...]}``.
+        A response that fails to parse as the requested JSON object degrades
+        gracefully (see the three-tier fallback below) rather than losing the
+        answer text entirely — a formatting slip must never cost the user
+        their answer.
+        """
+        structure_prompt = self.intent_classifier.get_classification_prompt(intent)
+        system_prompt = (
+            f"{structure_prompt}\n\n"
+            "Respond with ONLY a JSON object of this exact shape:\n"
+            '{"answer": "<your answer as a plain string>", '
+            '"claims": [{"claim": "...", "chunks": [1]}, {"claim": "...", "chunks": [1, 3]}]}\n'
+            '"claims" traces every factual claim in "answer" back to the numbered excerpt(s) '
+            "it was drawn from — use an empty array for `chunks` if a claim isn't clearly "
+            "grounded in a specific excerpt.\n"
+            'Every double quote inside "answer" or a claim string MUST be escaped as \\" so the '
+            "whole response is valid JSON — paraphrase quoted terms rather than reproducing "
+            "embedded quote marks verbatim."
+        )
         context = self._format_context(retrieved_chunks)
         user_message = (
             f'Based on the following document excerpts, answer this query: "{query}"\n\n'
             f"DOCUMENT EXCERPTS:\n{context}\n\n"
-            f"Remember:\n"
+            f'Remember, for the "answer" field:\n'
             f"1. Answer ONLY based on the provided excerpts\n"
             f"2. If the answer is not in the excerpts, say so clearly\n"
             f"3. Be accurate and cite the source pages when relevant\n"
@@ -60,100 +88,78 @@ class _BaseLLM(ABC):
             f"Never pad with restatement or extra elaboration beyond what the question needs"
         )
         logger.info(
-            f"LLM generate_answer: provider={settings.llm_provider}  model={self.model}  intent={intent.value}  context_chunks={len(retrieved_chunks)}"
-        )
-        logger.debug(
-            f"LLM system_prompt length={len(system_prompt)}  user_message length={len(user_message)}"
+            f"LLM generate_answer_with_claims: provider={settings.llm_provider}  model={self.model}  "
+            f"intent={intent.value}  context_chunks={len(retrieved_chunks)}"
         )
         start = time.time()
         try:
-            result = self._call(system_prompt, user_message)
+            # +500 over the plain-answer budget: this call must also carry
+            # the claims array and JSON-envelope/escaping overhead — reusing
+            # the bare answer ceiling risks truncating the JSON exactly on
+            # long "comprehensive"/"explain" answers with a dozen-plus claims.
+            raw = self._call(system_prompt, user_message, max_tokens=self.max_tokens + 500)
             duration = time.time() - start
-            logger.info(f"LLM generate_answer OK: duration={duration:.2f}s  answer_length={len(result)}")
-            logger.debug(f"LLM answer preview: {result[:200]}...")
+            result = self._parse_answer_with_claims(raw)
+            logger.info(
+                f"LLM generate_answer_with_claims OK: duration={duration:.2f}s  "
+                f"answer_length={len(result['answer'])}  claims_found={len(result['claims'])}"
+            )
             return result
         except Exception as e:
             duration = time.time() - start
             logger.error(
-                f"LLM generate_answer FAILED: duration={duration:.2f}s  error={type(e).__name__}: {e}"
+                f"LLM generate_answer_with_claims FAILED: duration={duration:.2f}s  "
+                f"error={type(e).__name__}: {e}"
             )
             raise
 
-    def extract_claims(self, answer: str, retrieved_chunks: List[RetrievedChunk]) -> List[dict]:
-        """Extract factual claims from ``answer`` and trace each one back to
-        the numbered excerpt(s) (``[1]``, ``[3]``, ...) it was drawn from, so
-        `SpanExtractor.extract_supporting_span` can search only within the
-        LLM-indicated chunks instead of fuzzy-matching blindly across all of
-        them. Returns ``[{"claim": str, "chunks": [int, ...]}, ...]`` —
-        ``chunks`` is empty when a claim isn't clearly grounded in one excerpt.
-        """
-        system_prompt = (
-            "You are an expert at extracting factual claims from text and tracing each one "
-            "back to its source excerpt.\n"
-            "Extract all factual claims (not opinions) from the ANSWER TEXT below.\n"
-            "For each claim, identify which numbered excerpt(s) it was drawn from.\n"
-            "Return ONLY a JSON array of objects with this exact shape:\n"
-            '[{"claim": "Photosynthesis occurs in chloroplasts", "chunks": [1]}, '
-            '{"claim": "CO2 is converted to glucose", "chunks": [1, 3]}]\n'
-            "Use an empty array for `chunks` if a claim isn't clearly grounded in a specific excerpt.\n"
-            'Every double quote inside a claim string MUST be escaped as \\" so the result is valid JSON — '
-            "paraphrase quoted terms from the answer rather than reproducing embedded quote marks verbatim."
-        )
-        context = self._format_context(retrieved_chunks)
-        user_message = f"DOCUMENT EXCERPTS:\n{context}\n\nANSWER TEXT:\n{answer}"
-        logger.debug(f"LLM extract_claims: answer_length={len(answer)}  chunks={len(retrieved_chunks)}")
-        start = time.time()
-        try:
-            # The chunk-indexed {"claim": ..., "chunks": [...]} shape is more
-            # verbose per-claim than a plain string array, and a long
-            # "comprehensive"/"explain" answer can carry a dozen-plus claims —
-            # a fixed budget too close to the old plain-string-array size
-            # truncates the JSON mid-array on exactly those answers.
-            raw = self._call(system_prompt, user_message, max_tokens=1200)
-            duration = time.time() - start
-            s = raw.find("[")
-            e = raw.rfind("]") + 1
-            if s == -1 or e <= s:
-                logger.warning(
-                    f"LLM extract_claims: no JSON array found in response  duration={duration:.2f}s"
-                )
-                return []
+    @staticmethod
+    def _parse_answer_with_claims(raw: str) -> dict:
+        s, e = raw.find("{"), raw.rfind("}") + 1
+        if s != -1 and e > s:
             try:
                 parsed = json.loads(raw[s:e])
+                answer = parsed.get("answer")
+                if isinstance(answer, str) and answer.strip():
+                    return {"answer": answer, "claims": _BaseLLM._normalize_claims(parsed.get("claims"))}
             except json.JSONDecodeError:
-                # A single malformed claim (e.g. an unescaped quote mark the
-                # model didn't escape) shouldn't discard every other claim in
-                # the batch — recover whatever individual objects are
-                # themselves valid JSON instead of failing the whole array.
-                parsed = []
-                for match in re.finditer(r"\{[^{}]*\}", raw[s:e]):
-                    try:
-                        parsed.append(json.loads(match.group()))
-                    except json.JSONDecodeError:
-                        continue
-                logger.warning(
-                    f"LLM extract_claims: array-level JSON parse failed, recovered "
-                    f"{len(parsed)} individually-valid claim object(s)"
-                )
-            if not isinstance(parsed, list):
-                return []
-            result = []
-            for item in parsed:
-                if isinstance(item, str):
-                    # Tolerate a plain-string-array response (model deviation
-                    # from the requested shape) as an unlocated claim.
-                    result.append({"claim": item, "chunks": []})
-                elif isinstance(item, dict) and item.get("claim"):
-                    indices = [c for c in (item.get("chunks") or []) if isinstance(c, int)]
-                    result.append({"claim": item["claim"], "chunks": indices})
-            logger.info(f"LLM extract_claims OK: duration={duration:.2f}s  claims_found={len(result)}")
-            return result
-        except (json.JSONDecodeError, Exception) as exc:
-            duration = time.time() - start
-            logger.warning(
-                f"LLM extract_claims FAILED: duration={duration:.2f}s  error={type(exc).__name__}: {exc}"
-            )
+                pass
+            # The whole object didn't parse (e.g. an unescaped quote inside a
+            # claim) — the answer field alone may still be well-formed, so
+            # recover just that rather than losing the answer over an
+            # unrelated claims-array formatting slip.
+            match = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', raw[s:e], re.DOTALL)
+            if match:
+                try:
+                    recovered = json.loads(f'"{match.group(1)}"')
+                    logger.warning(
+                        "LLM generate_answer_with_claims: recovered answer field from malformed JSON"
+                    )
+                    return {"answer": recovered, "claims": []}
+                except json.JSONDecodeError:
+                    pass
+        logger.warning(
+            "LLM generate_answer_with_claims: no valid JSON found, using raw response as the answer"
+        )
+        return {"answer": raw.strip(), "claims": []}
+
+    @staticmethod
+    def _normalize_claims(raw_claims) -> List[dict]:
+        """Tolerant claim-list normalization shared by ``generate_answer_with_claims``
+        and ``reflect_on_answer`` — accepts the requested
+        ``{"claim": ..., "chunks": [...]}`` shape, a plain string (model
+        deviation, treated as an unlocated claim), and filters ``chunks`` to
+        ints only."""
+        if not isinstance(raw_claims, list):
             return []
+        result = []
+        for item in raw_claims:
+            if isinstance(item, str):
+                result.append({"claim": item, "chunks": []})
+            elif isinstance(item, dict) and item.get("claim"):
+                indices = [c for c in (item.get("chunks") or []) if isinstance(c, int)]
+                result.append({"claim": item["claim"], "chunks": indices})
+        return result
 
     def reflect_on_answer(
         self,
@@ -167,15 +173,20 @@ class _BaseLLM(ABC):
 
         Checks factual consistency against the retrieved excerpts, removes/hedges
         hallucinated content, and improves clarity/structure/completeness/exam
-        relevance. Returns the same shape on both success and failure so callers
-        never need to special-case a broken reflection pass — on any parse or
-        provider failure this degrades to "no change", not an exception.
+        relevance. Also re-traces claims for the (possibly revised) answer in
+        this same call — merged in so a materially-changed answer never needs
+        a separate re-extraction round trip. Returns the same shape on both
+        success and failure so callers never need to special-case a broken
+        reflection pass — on any parse or provider failure this degrades to
+        "no change", not an exception. ``claims`` is ``None`` on failure,
+        signaling callers to reuse the draft's own claims instead.
         """
         fallback = {
             "revised_answer": draft_answer,
             "materially_changed": False,
             "should_block": False,
             "issues_found": [],
+            "claims": None,
         }
         system_prompt = (
             "You are a reflection and quality-control pass reviewing a draft answer for a "
@@ -190,11 +201,14 @@ class _BaseLLM(ABC):
             "6. Exam relevance — focused on what's testable, no padding\n\n"
             "Return ONLY a JSON object with this exact shape:\n"
             '{"revised_answer": "...", "materially_changed": true, "should_block": false, '
-            '"issues_found": ["..."]}\n\n'
+            '"issues_found": ["..."], "claims": [{"claim": "...", "chunks": [1]}]}\n\n'
             "Set materially_changed=true only if you changed factual content or "
             "citation-relevant wording — not for pure formatting/style polish. Set "
             "should_block=true only if the draft is fundamentally unusable (e.g. hallucinated "
-            "throughout) and cannot be fixed by revision."
+            'throughout) and cannot be fixed by revision. "claims" traces every factual claim '
+            'in "revised_answer" back to the numbered excerpt(s) it was drawn from — same '
+            "shape and rules as the draft's own claims; empty array for `chunks` if a claim "
+            "isn't clearly grounded in a specific excerpt."
         )
         context = self._format_context(retrieved_chunks)
         user_message = (
@@ -229,11 +243,12 @@ class _BaseLLM(ABC):
                 "materially_changed": bool(parsed.get("materially_changed", False)),
                 "should_block": bool(parsed.get("should_block", False)),
                 "issues_found": parsed.get("issues_found") or [],
+                "claims": self._normalize_claims(parsed.get("claims")),
             }
             logger.info(
                 f"LLM reflect_on_answer OK: duration={duration:.2f}s  "
                 f"materially_changed={result['materially_changed']}  should_block={result['should_block']}  "
-                f"issues={len(result['issues_found'])}"
+                f"issues={len(result['issues_found'])}  claims={len(result['claims'])}"
             )
             return result
         except (json.JSONDecodeError, Exception) as exc:
@@ -275,8 +290,9 @@ class _BaseLLM(ABC):
         logger.info(
             f"LLM generate_structured_answer: query={query!r}  intent={intent.value}  chunks={len(retrieved_chunks)}"
         )
-        answer = self.generate_answer(query, retrieved_chunks, intent)
-        claims = self.extract_claims(answer, retrieved_chunks)
+        drafted = self.generate_answer_with_claims(query, retrieved_chunks, intent)
+        answer = drafted["answer"]
+        claims = drafted["claims"]
         fmt = {
             QueryType.DEFINITION: "definition",
             QueryType.EXPLAIN: "comprehensive",
