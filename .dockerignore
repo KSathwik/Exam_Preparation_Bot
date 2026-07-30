@@ -1,0 +1,41 @@
+# Secrets — never bake these into an image layer
+.env
+.env.local
+.env.*.local
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Runtime data — recreated by the container, no need to ship local state
+logs/
+cache/
+uploads/
+data/
+*.db
+
+# Tests and docs — not needed at runtime
+tests/
+*.md
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
