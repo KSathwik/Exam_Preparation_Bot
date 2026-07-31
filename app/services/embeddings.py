@@ -12,7 +12,7 @@ from sentence_transformers import SentenceTransformer
 
 from app.core.config import settings
 
-from .models import ChunkMetadata, Document, DocumentChunk
+from .models import ChunkMetadata, Document, DocumentChunk, RetrievedChunk
 
 try:
     from rank_bm25 import BM25Okapi
@@ -296,6 +296,29 @@ class VectorStoreManager:
                 self._bm25_dirty = True
             return removed
 
+    def get_chunks_by_document_ids(self, document_ids: List[str]) -> List[RetrievedChunk]:
+        """Every chunk belonging to any of ``document_ids``, in natural
+        reading order — for Cache-Augmented Generation (see
+        context_router.py), not similarity-ranked like search(). Reuses the
+        same metadata-filter shape as remove_by_document_id (read instead of
+        delete). relevance_score is 1.0 for every chunk: nothing was ranked
+        or filtered out, so "was retrieval relevant" isn't a meaningful signal
+        here — ConfidenceScorer's citation_rate/source_consistency terms
+        carry the real signal in this mode instead."""
+        wanted = set(document_ids)
+        with self._index_lock:
+            matches = [m for m in self.vector_store.chunk_metadata if m.get("document_id") in wanted]
+        matches.sort(key=lambda m: (m.get("page_number", 0), m.get("metadata", {}).get("chunk_index", 0)))
+        return [
+            RetrievedChunk(
+                content=m.get("content", ""),
+                metadata=ChunkMetadata(**m.get("metadata", {})),
+                relevance_score=1.0,
+                rank=i,
+            )
+            for i, m in enumerate(matches)
+        ]
+
     def reset(self) -> None:
         """Clear the index and persist the empty state so a restart doesn't
         resurrect the previous (pre-reset) data from disk."""
@@ -376,7 +399,23 @@ class VectorStoreManager:
             # space, so filtering is post-hoc: over-fetch candidates from
             # FAISS, then filter and re-rank in Python. Cheap at this
             # project's scale.
-            fetch_k = min(self.vector_store.get_size(), max(top_k * 5, 50))
+            #
+            # When document_ids/session_ids actually narrow the search (not
+            # just content_type), a fixed top_k*5 fetch searches the FULL
+            # index for nearest neighbors *before* filtering — once enough
+            # other documents/conversations are indexed, a genuinely relevant
+            # chunk from the scoped set can rank outside that fixed window
+            # globally, so post-hoc filtering finds nothing even though the
+            # right content exists. Scan the whole index in that case instead
+            # of an approximate top-k window — a flat-index full scan is
+            # cheap at this project's documented scale (tens of thousands of
+            # vectors; see docs/PHASE_2_ROADMAP.md), and correctness for a
+            # student's own uploaded document matters more than shaving a
+            # few milliseconds off a query that's about to hit an LLM anyway.
+            if document_ids is not None or session_ids is not None:
+                fetch_k = self.vector_store.get_size()
+            else:
+                fetch_k = min(self.vector_store.get_size(), max(top_k * 5, 50))
             candidates: List[Tuple[int, dict, float]] = []
             if fetch_k > 0:
                 distances, indices = self.vector_store.search(query_embedding, fetch_k)

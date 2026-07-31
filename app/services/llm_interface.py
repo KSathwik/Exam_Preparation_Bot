@@ -11,6 +11,7 @@ from loguru import logger
 from app.core.config import settings
 
 from .models import ChatMessage, QueryType, RetrievedChunk
+from .response_formats import LENGTH_MAX_TOKENS, RESPONSE_FORMAT_TEMPLATES, ResponseFormat
 
 _DEFAULT_MODELS = {
     "gemini": "gemini-2.0-flash",
@@ -22,26 +23,22 @@ _DEFAULT_MODELS = {
 class _BaseLLM(ABC):
     """Shared logic for all LLM providers."""
 
-    def __init__(self, intent_classifier=None):
+    def __init__(self):
         self.model = settings.model_name or _DEFAULT_MODELS[settings.llm_provider]
         self.max_tokens = settings.max_tokens
         self.temperature = settings.temperature
         self.top_p = settings.top_p
-        self._intent_classifier = intent_classifier
-
-    @property
-    def intent_classifier(self):
-        if self._intent_classifier is None:
-            from .intent_classifier import IntentClassifier
-
-            self._intent_classifier = IntentClassifier()
-        return self._intent_classifier
 
     @abstractmethod
     def _call(self, system_prompt: str, user_message: str, max_tokens: int | None = None) -> str: ...
 
     def generate_answer_with_claims(
-        self, query: str, retrieved_chunks: List[RetrievedChunk], intent: QueryType
+        self,
+        query: str,
+        retrieved_chunks: List[RetrievedChunk],
+        intent: QueryType,
+        response_format: ResponseFormat = ResponseFormat.GENERAL,
+        history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         """Draft an answer AND trace its factual claims back to the numbered
         excerpt(s) (``[1]``, ``[3]``, ...) they were drawn from, in a single
@@ -51,15 +48,21 @@ class _BaseLLM(ABC):
         so it can search only the LLM-indicated chunks instead of fuzzy-matching
         blindly across all of them.
 
+        ``response_format`` drives the answer's *structure* (headings, bullets,
+        a table, flashcards, ...) — this is the presentation axis, orthogonal
+        to ``intent`` which only still matters here as a fallback label; see
+        ``response_formats.py`` for the actual per-format instructions.
+
         Returns ``{"answer": str, "claims": [{"claim": str, "chunks": [int, ...]}, ...]}``.
         A response that fails to parse as the requested JSON object degrades
         gracefully (see the three-tier fallback below) rather than losing the
         answer text entirely — a formatting slip must never cost the user
         their answer.
         """
-        structure_prompt = self.intent_classifier.get_classification_prompt(intent)
+        template = RESPONSE_FORMAT_TEMPLATES[response_format]
         system_prompt = (
-            f"{structure_prompt}\n\n"
+            "You are a helpful study assistant for a student preparing for exams.\n"
+            f"{template.prompt_instructions}\n\n"
             "Respond with ONLY a JSON object of this exact shape:\n"
             '{"answer": "<your answer as a plain string>", '
             '"claims": [{"claim": "...", "chunks": [1]}, {"claim": "...", "chunks": [1, 3]}]}\n'
@@ -68,28 +71,30 @@ class _BaseLLM(ABC):
             "grounded in a specific excerpt.\n"
             'Every double quote inside "answer" or a claim string MUST be escaped as \\" so the '
             "whole response is valid JSON — paraphrase quoted terms rather than reproducing "
-            "embedded quote marks verbatim."
+            'embedded quote marks verbatim. Newlines inside "answer" (e.g. between Markdown '
+            "headings/list items) MUST be escaped as \\n, not literal line breaks.\n"
+            "If a RECENT CONVERSATION is provided below, use it only to resolve what the current "
+            'question is referring to (pronouns like "it"/"that", or "the second one") — never '
+            "as a source of facts. Every factual claim must still come from the document excerpts."
         )
         context = self._format_context(retrieved_chunks)
         user_message = (
+            f"{self._format_history(history)}"
             f'Based on the following document excerpts, answer this query: "{query}"\n\n'
             f"DOCUMENT EXCERPTS:\n{context}\n\n"
             f'Remember, for the "answer" field:\n'
             f"1. Answer ONLY based on the provided excerpts\n"
             f"2. If the answer is not in the excerpts, say so clearly\n"
             f"3. Be accurate and cite the source pages when relevant\n"
-            f"4. For the intent type '{intent.value}', structure your answer appropriately\n"
-            f"5. Write in flowing prose paragraphs, not a bulleted or numbered list and not "
-            f"bold-header sections — a short list is only appropriate if the content is "
-            f"genuinely an unordered set of discrete items (not for a process, explanation, "
-            f"or definition, which should read as connected paragraphs even when they cover "
-            f"several stages or points). Use multiple paragraphs for anything with more than "
-            f"one facet — don't compress everything into a single dense paragraph either. "
-            f"Never pad with restatement or extra elaboration beyond what the question needs"
+            f"4. Follow the structure instructions above exactly — do not fall back to plain "
+            f"prose paragraphs if a specific structure (list, table, flashcards, etc.) was requested\n"
+            f"5. Never pad with restatement or extra elaboration beyond what the question needs"
         )
+        max_tokens = LENGTH_MAX_TOKENS[template.default_length]
         logger.info(
             f"LLM generate_answer_with_claims: provider={settings.llm_provider}  model={self.model}  "
-            f"intent={intent.value}  context_chunks={len(retrieved_chunks)}"
+            f"intent={intent.value}  response_format={response_format.value}  "
+            f"context_chunks={len(retrieved_chunks)}"
         )
         start = time.time()
         try:
@@ -97,7 +102,7 @@ class _BaseLLM(ABC):
             # the claims array and JSON-envelope/escaping overhead — reusing
             # the bare answer ceiling risks truncating the JSON exactly on
             # long "comprehensive"/"explain" answers with a dozen-plus claims.
-            raw = self._call(system_prompt, user_message, max_tokens=self.max_tokens + 500)
+            raw = self._call(system_prompt, user_message, max_tokens=max_tokens + 500)
             duration = time.time() - start
             result = self._parse_answer_with_claims(raw)
             logger.info(
@@ -114,11 +119,51 @@ class _BaseLLM(ABC):
             raise
 
     @staticmethod
+    def _escape_raw_newlines_in_json_strings(text: str) -> str:
+        """A model asked for multi-paragraph/heading-heavy Markdown inside a
+        JSON string field doesn't reliably escape *every* embedded newline as
+        ``\\n`` despite being told to — the more structured the requested
+        format (headings, lists), the more paragraph breaks there are to get
+        right. A single missed one is a raw control character, which is
+        invalid inside a JSON string literal and fails ``json.loads``
+        entirely (not just for that field — the whole object). Repairs this
+        mechanically by walking the text and escaping newlines only when
+        actually inside a string literal (tracked via unescaped-quote
+        toggling), never ones that are just structural whitespace between
+        JSON tokens."""
+        out = []
+        in_string = False
+        escaped = False
+        for ch in text:
+            if in_string:
+                if escaped:
+                    out.append(ch)
+                    escaped = False
+                elif ch == "\\":
+                    out.append(ch)
+                    escaped = True
+                elif ch == '"':
+                    out.append(ch)
+                    in_string = False
+                elif ch == "\n":
+                    out.append("\\n")
+                elif ch == "\r":
+                    pass  # a preceding \r\n already became \\n above; a bare \r is dropped
+                else:
+                    out.append(ch)
+            else:
+                if ch == '"':
+                    in_string = True
+                out.append(ch)
+        return "".join(out)
+
+    @staticmethod
     def _parse_answer_with_claims(raw: str) -> dict:
         s, e = raw.find("{"), raw.rfind("}") + 1
         if s != -1 and e > s:
+            repaired = _BaseLLM._escape_raw_newlines_in_json_strings(raw[s:e])
             try:
-                parsed = json.loads(raw[s:e])
+                parsed = json.loads(repaired)
                 answer = parsed.get("answer")
                 if isinstance(answer, str) and answer.strip():
                     return {"answer": answer, "claims": _BaseLLM._normalize_claims(parsed.get("claims"))}
@@ -128,7 +173,7 @@ class _BaseLLM(ABC):
             # claim) — the answer field alone may still be well-formed, so
             # recover just that rather than losing the answer over an
             # unrelated claims-array formatting slip.
-            match = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', raw[s:e], re.DOTALL)
+            match = re.search(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', repaired, re.DOTALL)
             if match:
                 try:
                     recovered = json.loads(f'"{match.group(1)}"')
@@ -168,6 +213,8 @@ class _BaseLLM(ABC):
         draft_answer: str,
         validator_summary: str,
         intent: QueryType,
+        response_format: ResponseFormat = ResponseFormat.GENERAL,
+        history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         """Quality-control pass over a drafted answer before it's shown to the user.
 
@@ -195,8 +242,8 @@ class _BaseLLM(ABC):
             "1. Factual consistency — does every claim hold up against the excerpts?\n"
             "2. Hallucination — remove or hedge anything not grounded in the excerpts\n"
             "3. Clarity — plain, well-organized language\n"
-            "4. Structure — matches the expected shape for this intent type. The drafting "
-            f"instructions were:\n{self.intent_classifier.get_classification_prompt(intent)}\n"
+            "4. Structure — matches the expected shape. The drafting instructions were: "
+            f"{RESPONSE_FORMAT_TEMPLATES[response_format].structure_note}\n"
             "5. Completeness — uses the relevant excerpt information a student would need\n"
             "6. Exam relevance — focused on what's testable, no padding\n\n"
             "Return ONLY a JSON object with this exact shape:\n"
@@ -212,20 +259,26 @@ class _BaseLLM(ABC):
         )
         context = self._format_context(retrieved_chunks)
         user_message = (
+            f"{self._format_history(history)}"
             f'Original question: "{query}"\n\n'
             f"DOCUMENT EXCERPTS:\n{context}\n\n"
             f"DRAFT ANSWER:\n{draft_answer}\n\n"
             f"VALIDATOR REPORT (citation/confidence signal computed from the draft):\n{validator_summary}\n"
         )
-        logger.info(f"LLM reflect_on_answer: intent={intent.value}  draft_length={len(draft_answer)}")
+        logger.info(
+            f"LLM reflect_on_answer: intent={intent.value}  response_format={response_format.value}  "
+            f"draft_length={len(draft_answer)}"
+        )
         start = time.time()
         try:
-            # +500 over the draft's own budget: this call must reproduce the
+            # +500 over the draft's own budget (itself derived from
+            # response_format's length tier): this call must reproduce the
             # full (possibly near-max-length) draft inside a JSON wrapper —
             # escaping expansion plus materially_changed/should_block/
             # issues_found overhead — reusing the exact same ceiling risks
             # truncating the JSON even when the draft itself fit comfortably.
-            raw = self._call(system_prompt, user_message, max_tokens=self.max_tokens + 500)
+            max_tokens = LENGTH_MAX_TOKENS[RESPONSE_FORMAT_TEMPLATES[response_format].default_length]
+            raw = self._call(system_prompt, user_message, max_tokens=max_tokens + 500)
             duration = time.time() - start
             s = raw.find("{")
             e = raw.rfind("}") + 1
@@ -234,7 +287,7 @@ class _BaseLLM(ABC):
                     f"LLM reflect_on_answer: no JSON object found in response  duration={duration:.2f}s"
                 )
                 return fallback
-            parsed = json.loads(raw[s:e])
+            parsed = json.loads(_BaseLLM._escape_raw_newlines_in_json_strings(raw[s:e]))
             if not isinstance(parsed, dict) or "revised_answer" not in parsed:
                 logger.warning(f"LLM reflect_on_answer: malformed JSON shape  duration={duration:.2f}s")
                 return fallback
@@ -285,24 +338,26 @@ class _BaseLLM(ABC):
             return ""
 
     def generate_structured_answer(
-        self, query: str, retrieved_chunks: List[RetrievedChunk], intent: QueryType
+        self,
+        query: str,
+        retrieved_chunks: List[RetrievedChunk],
+        intent: QueryType,
+        response_format: ResponseFormat = ResponseFormat.GENERAL,
+        history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         logger.info(
-            f"LLM generate_structured_answer: query={query!r}  intent={intent.value}  chunks={len(retrieved_chunks)}"
+            f"LLM generate_structured_answer: query={query!r}  intent={intent.value}  "
+            f"response_format={response_format.value}  chunks={len(retrieved_chunks)}"
         )
-        drafted = self.generate_answer_with_claims(query, retrieved_chunks, intent)
+        drafted = self.generate_answer_with_claims(
+            query, retrieved_chunks, intent, response_format=response_format, history=history
+        )
         answer = drafted["answer"]
         claims = drafted["claims"]
-        fmt = {
-            QueryType.DEFINITION: "definition",
-            QueryType.EXPLAIN: "comprehensive",
-            QueryType.COMPARE: "comparison",
-            QueryType.PROCESS: "ordered_steps",
-            QueryType.EXAMPLE: "examples",
-            QueryType.DIAGRAM: "description",
-            QueryType.VAGUE: "general",
-        }
-        format_type = fmt.get(intent, "general")
+        # format_type is simply the classified response_format's own value now
+        # — no more a hand-maintained intent->label dict, since presentation
+        # shape is response_format's whole job (see response_formats.py).
+        format_type = response_format.value
         logger.info(f"LLM structured answer complete: format_type={format_type}  claims={len(claims)}")
         return {
             "answer": answer,
@@ -310,6 +365,20 @@ class _BaseLLM(ABC):
             "claims": claims,
             "intent": intent.value,
         }
+
+    @staticmethod
+    def _format_history(history: Optional[List[ChatMessage]]) -> str:
+        """Recent conversation turns, formatted as a prompt block — empty
+        string when there's no history, so callers can splice this in
+        unconditionally without an extra branch. Kept short (callers already
+        cap how many turns are fetched) since this is purely for resolving
+        references in the CURRENT question, not a source of facts."""
+        if not history:
+            return ""
+        transcript = "\n".join(f"{m.role}: {m.content}" for m in history)
+        return (
+            f"RECENT CONVERSATION (for reference resolution only, not a source of facts):\n{transcript}\n\n"
+        )
 
     @staticmethod
     def _format_context(chunks: List[RetrievedChunk]) -> str:
@@ -331,8 +400,8 @@ class _GeminiLLM(_BaseLLM):
     """Uses ``google-genai`` — the ``google-generativeai`` package it replaces
     reached end-of-life and receives no further updates or security fixes."""
 
-    def __init__(self, intent_classifier=None):
-        super().__init__(intent_classifier)
+    def __init__(self):
+        super().__init__()
         from google import genai
 
         api_key = settings.gemini_api_key
@@ -368,8 +437,8 @@ class _GeminiLLM(_BaseLLM):
 
 
 class _OpenAILLM(_BaseLLM):
-    def __init__(self, intent_classifier=None):
-        super().__init__(intent_classifier)
+    def __init__(self):
+        super().__init__()
         from openai import OpenAI
 
         api_key = settings.openai_api_key
@@ -408,8 +477,8 @@ class _OpenAILLM(_BaseLLM):
 
 
 class _AnthropicLLM(_BaseLLM):
-    def __init__(self, intent_classifier=None):
-        super().__init__(intent_classifier)
+    def __init__(self):
+        super().__init__()
         import anthropic
 
         api_key = settings.anthropic_api_key
@@ -456,7 +525,7 @@ _PROVIDERS = {
 }
 
 
-def ClaudeInterface(intent_classifier=None) -> _BaseLLM:
+def ClaudeInterface() -> _BaseLLM:
     """Factory that returns the LLM backend matching ``settings.llm_provider``.
 
     Named ``ClaudeInterface`` for backward compatibility with the rest of the
@@ -466,4 +535,4 @@ def ClaudeInterface(intent_classifier=None) -> _BaseLLM:
     cls = _PROVIDERS.get(provider)
     if cls is None:
         raise ValueError(f"Unknown LLM provider '{provider}'. Choose from: {', '.join(_PROVIDERS)}")
-    return cls(intent_classifier=intent_classifier)
+    return cls()

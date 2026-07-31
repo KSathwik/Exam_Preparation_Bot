@@ -82,6 +82,7 @@ async def get_conversation(session_id: str, db: Session = Depends(get_db)):
                 content=m.content,
                 timestamp=m.created_at.isoformat() if m.created_at else "",
                 intent=m.intent,
+                format_type=m.format_type,
             )
             for m in messages
         ],

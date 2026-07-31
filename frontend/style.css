@@ -9,7 +9,7 @@
   --color-border:#e1e3f0;
   --color-text:#191a2e;
   --color-text-muted:#63677e;
-  --color-text-faint:#9296ac;
+  --color-text-faint:#6b6f85; /* ~4.95:1 on white — was #9296ac (~2.9:1, fails WCAG AA) */
 
   --color-primary:#4f46e5;
   --color-primary-hover:#4338ca;
@@ -68,7 +68,7 @@
     --color-border:#2f3350;
     --color-text:#f0f1fc;
     --color-text-muted:#a8acc8;
-    --color-text-faint:#7d81a3;
+    --color-text-faint:#888dbb; /* ~5.27:1 on the dark bg — was #7d81a3 (~4.44:1, just under WCAG AA) */
 
     --color-primary:#8b7ffb;
     --color-primary-hover:#a39bfd;
@@ -102,7 +102,7 @@
   --color-border:#2f3350;
   --color-text:#f0f1fc;
   --color-text-muted:#a8acc8;
-  --color-text-faint:#7d81a3;
+  --color-text-faint:#888dbb; /* ~5.27:1 on the dark bg — was #7d81a3 (~4.44:1, just under WCAG AA) */
   --color-primary:#8b7ffb;
   --color-primary-hover:#a39bfd;
   --color-primary-soft:#2c2b58;
@@ -132,7 +132,7 @@
   --color-border:#e1e3f0;
   --color-text:#191a2e;
   --color-text-muted:#63677e;
-  --color-text-faint:#9296ac;
+  --color-text-faint:#6b6f85; /* ~4.95:1 on white — was #9296ac (~2.9:1, fails WCAG AA) */
   --color-primary:#4f46e5;
   --color-primary-hover:#4338ca;
   --color-primary-soft:#ece9fd;
@@ -336,6 +336,36 @@ button:focus-visible,
 .conversation-menu button:hover{background:var(--color-surface-alt)}
 .conversation-menu button.danger{color:var(--color-error-fg)}
 
+/* AI Hub — always-visible sidebar shortcuts to external AI assistants and
+   knowledge sources (see aiHub.js). Deliberately plain buttons in normal
+   document flow, not a dropdown/menu: the whole point is that students
+   always know where to find these, without opening anything first. */
+.sidebar-ai-hub{
+  border-top:1px solid var(--color-border);
+  padding:var(--space-3) var(--space-2);
+  display:flex;flex-direction:column;gap:var(--space-3);
+  flex-shrink:0;
+}
+.ai-hub-group{display:flex;flex-direction:column;gap:1px}
+.ai-hub-group-header{
+  display:flex;align-items:center;gap:var(--space-2);
+  padding:0 var(--space-3) var(--space-1);
+  font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--color-text-faint);
+}
+.ai-hub-item{
+  display:flex;align-items:center;gap:var(--space-2);
+  width:100%;text-align:left;
+  padding:8px var(--space-3);
+  background:none;border:none;border-radius:var(--radius-sm);
+  font:inherit;font-size:13.5px;color:var(--color-text-muted);
+  cursor:pointer;
+  transition:background var(--transition-fast),color var(--transition-fast),transform var(--transition-fast);
+}
+.ai-hub-item:hover{background:var(--color-border);color:var(--color-text);transform:translateX(2px)}
+.ai-hub-item:focus-visible{outline:2px solid var(--color-primary);outline-offset:-2px}
+.ai-hub-item-icon{font-size:15px;line-height:1;flex-shrink:0}
+
 .sidebar-footer{
   border-top:1px solid var(--color-border);
   padding:var(--space-3);
@@ -432,6 +462,7 @@ button:focus-visible,
 .message-row.assistant .message-bubble{
   color:var(--color-text);
   line-height:1.7;
+  overflow-wrap:anywhere;
 }
 .message-row.assistant .message-bubble > *:not(:last-child){margin-bottom:var(--space-3)}
 
@@ -493,6 +524,41 @@ button:focus-visible,
 .message-action-btn:active{transform:scale(.9)}
 .message-action-btn.copied{color:var(--color-success-fg)}
 
+/* "Continue Research" — trigger + anchored dropdown of external providers.
+   Mirrors .conversation-menu's positioning/close pattern (see sidebar.js). */
+.research-control[hidden]{display:none}
+.research-control{display:inline-flex}
+.research-trigger[aria-expanded="true"]{background:var(--color-border);color:var(--color-text)}
+.research-menu{
+  /* Fixed + appended to <body> (see continueResearch.js) so it isn't
+     clipped by #messagesBox's own overflow-y:auto scroll bounds. */
+  position:fixed;
+  z-index:var(--z-modal);
+  background:var(--color-surface);
+  border:1px solid var(--color-border);
+  border-radius:var(--radius-md);
+  box-shadow:var(--shadow-lg);
+  min-width:180px;
+  overflow:hidden;
+  animation:researchMenuIn .12s ease-out;
+}
+@keyframes researchMenuIn{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+.research-menu-header{
+  padding:var(--space-2) var(--space-3) 6px;
+  font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--color-text-faint);
+  border-bottom:1px solid var(--color-border);
+}
+.research-menu-item{
+  display:flex;align-items:center;gap:var(--space-2);width:100%;
+  padding:var(--space-2) var(--space-3);
+  background:none;border:none;cursor:pointer;text-align:left;
+  font-size:13px;font-family:inherit;color:var(--color-text);
+}
+.research-menu-item:hover,.research-menu-item:focus-visible{background:var(--color-surface-alt)}
+.research-menu-item:focus-visible{outline:none}
+.research-menu-icon{font-size:15px;line-height:1;flex-shrink:0}
+
 /* Confidence / hallucination-risk badges + sources disclosure (folds in what
    used to be the standalone #responsePanel metrics/sources card) */
 .message-meta{
@@ -548,7 +614,11 @@ button:focus-visible,
    assistant reply (matched purely in CSS via :last-child) so they surface
    exactly when relevant without cluttering older messages. */
 .study-chips{display:none;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)}
-.message-row.assistant:last-child .study-chips{display:flex}
+/* Tracked via an explicit JS-toggled class (see markLatestAssistantRow in
+   chat.js), not :last-child — a plain DOM-position selector broke the
+   moment anything (e.g. an upload's system message) got appended after the
+   answer, which is a normal mid-conversation flow, not an edge case. */
+.message-row.assistant.is-latest-assistant .study-chips{display:flex}
 .study-chips .suggestion-chip{font-size:12px;padding:4px 12px;font-weight:500}
 
 /* System-style ephemeral upload messages inside the transcript */
@@ -618,6 +688,12 @@ button:focus-visible,
 .composer-inner:focus-within{
   border-color:var(--color-primary);
   box-shadow:0 0 0 3px var(--color-primary-soft),var(--shadow-sm);
+}
+.composer-inner.shake{animation:composerShake .35s ease-in-out}
+@keyframes composerShake{
+  0%,100%{transform:translateX(0)}
+  20%,60%{transform:translateX(-4px)}
+  40%,80%{transform:translateX(4px)}
 }
 #queryInput{
   flex:1;resize:none;overflow-y:auto;

@@ -195,6 +195,22 @@ async def websocket_query(websocket: WebSocket):
             if not query:
                 await websocket.send_json({"type": "error", "message": "Query is required"})
                 continue
+            if len(query) > 1000:
+                await websocket.send_json(
+                    {"type": "error", "message": "Query must be 1000 characters or fewer"}
+                )
+                continue
+            # Unlike the REST QueryRequest schema, nothing validates this JSON
+            # payload before it reaches the pipeline — a malformed document_ids
+            # (wrong type, non-string entries) would otherwise surface as an
+            # opaque generic error deep inside run_in_threadpool.
+            if document_ids is not None and (
+                not isinstance(document_ids, list) or not all(isinstance(d, str) for d in document_ids)
+            ):
+                await websocket.send_json(
+                    {"type": "error", "message": "document_ids must be a list of strings"}
+                )
+                continue
 
             try:
                 intent_result = await run_in_threadpool(bot.intent_classifier.classify, query)

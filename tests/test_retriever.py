@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.config import settings
-from app.services.models import QueryType
+from app.services.models import ChunkMetadata, QueryType, RetrievedChunk
 from app.services.retriever import AdaptiveRetriever, HybridRetriever
 
 
@@ -217,6 +217,40 @@ def test_hybrid_retriever_not_relevant_below_threshold():
     hybrid = HybridRetriever(vs)
     result = hybrid.search("unrelated", QueryType.VAGUE)
     assert result["is_relevant"] is False
+
+
+# ── get_full_context (CAG path) ───────────────────────────────────────
+
+
+def _retrieved_chunk(content):
+    meta = ChunkMetadata(page_number=1, chunk_index=0, total_chunks=1, file_name="doc.pdf")
+    return RetrievedChunk(content=content, metadata=meta, relevance_score=1.0, rank=0)
+
+
+def test_get_full_context_returns_all_chunks_for_the_scope():
+    vs = MagicMock()
+    vs.get_chunks_by_document_ids.return_value = [_retrieved_chunk("a"), _retrieved_chunk("b")]
+    hybrid = HybridRetriever(vs)
+
+    result = hybrid.get_full_context(["doc-1"])
+
+    vs.get_chunks_by_document_ids.assert_called_once_with(["doc-1"])
+    assert len(result["chunks"]) == 2
+    assert result["is_relevant"] is True
+    assert result["in_scope"] is True
+    assert result["total_retrieved"] == 2
+
+
+def test_get_full_context_empty_scope_is_not_relevant():
+    vs = MagicMock()
+    vs.get_chunks_by_document_ids.return_value = []
+    hybrid = HybridRetriever(vs)
+
+    result = hybrid.get_full_context(["nonexistent-doc"])
+
+    assert result["chunks"] == []
+    assert result["is_relevant"] is False
+    assert result["total_retrieved"] == 0
 
 
 # ── Cross-encoder reranking (opt-in, off by default) ──────────────────

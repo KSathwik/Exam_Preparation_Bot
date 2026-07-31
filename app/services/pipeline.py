@@ -40,7 +40,7 @@ class ExamPrepBot:
         self.vector_store_manager = vector_store_manager or VectorStoreManager()
         self.intent_classifier = intent_classifier or IntentClassifier()
         self.retriever = HybridRetriever(self.vector_store_manager)
-        self.llm = llm or ClaudeInterface(intent_classifier=self.intent_classifier)
+        self.llm = llm or ClaudeInterface()
         self.span_extractor = SpanExtractor()
         self.confidence_scorer = ConfidenceScorer()
         self.chat_history: list[ChatMessage] = []
@@ -120,7 +120,7 @@ class ExamPrepBot:
         )
 
     # ------------------------------------------------------------------
-    # Stats / Reset
+    # Stats
     # ------------------------------------------------------------------
     def get_stats(self) -> dict:
         return {
@@ -129,11 +129,6 @@ class ExamPrepBot:
             "model": settings.model_name,
             "embedding_model": settings.embedding_model,
         }
-
-    def reset(self) -> None:
-        logger.info("Resetting bot")
-        self.chat_history.clear()
-        self.vector_store_manager.reset()
 
 
 def create_bot() -> ExamPrepBot:

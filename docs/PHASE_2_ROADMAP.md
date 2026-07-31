@@ -3,10 +3,20 @@
 Phase 1 (this rebuild) delivered the multi-agent pipeline foundation: Orchestrator/Retrieval/
 Knowledge/Reflection/Memory agents, hybrid (dense + BM25) retrieval with opt-in cross-encoder
 reranking, structural chunking, chunk-indexed citations, and an opt-in conversation-memory
-persistence layer. Everything below was scoped out of Phase 1 by explicit decision, not because it's
-unimportant — this is a punch list for the next phase, not a wishlist.
+persistence layer — since extended with intent-driven response formatting (`format_classifier.py`/
+`response_formats.py`, ~20 presentation formats detected from ordinary phrasing) and Hybrid RAG + CAG
+retrieval routing (`context_router.py`, whole-document context instead of ranked chunks when the
+scope is small enough). Everything below was scoped out of Phase 1 by explicit decision, not because
+it's unimportant — this is a punch list for the next phase, not a wishlist.
 
 ## Deferred agents
+
+> **Not to be confused with**: intent-driven response *formatting* (`response_formats.py`) already
+> lets a student ask for MCQ-shaped or flashcard-shaped *output* today ("generate MCQs on this",
+> "create flashcards for this chapter") — that's a presentation format on top of the existing Q&A
+> pipeline, produced in one LLM call like any other answer. The agents below are a different, bigger
+> thing: standalone generation *with grading/scheduling/spaced-repetition state*, not just shaping a
+> single answer's Markdown.
 
 - **Quiz Agent** — generate practice questions (MCQ/short-answer) from uploaded material, graded
   against the source excerpts the same way answers are cited today.
@@ -41,6 +51,14 @@ and a dashboard surfacing it. Revisit once those agents land.
 
 ## Retrieval/embedding follow-ups (reassess, don't build speculatively)
 
+- **Provider-level prompt/context caching** — Hybrid RAG + CAG (`context_router.py`) already gives the
+  drafting LLM a whole small document's context instead of ranked chunks; the next, designed-but-not-
+  built step is reusing that *same* context across a conversation's repeat queries without
+  re-processing it, via each provider's native caching (Anthropic `cache_control` content blocks,
+  Gemini's explicit `client.caches.create`/`cached_content=`, OpenAI's automatic caching for prompts
+  ≥1024 tokens). Deliberately not bundled with the CAG routing work itself — it's provider-specific,
+  Gemini's version needs real new state (a cache-handle registry keyed by document-set + model, with
+  TTL tracking), and the routing change alone already captures the main accuracy/latency win.
 - **FAISS index type**: currently `IndexFlatL2` — query speed is a non-issue at this project's scale
   (low-single-digit ms even at tens of thousands of vectors). Reassess **only** once a single shared
   index exceeds roughly 200k vectors; at that point `IndexIVFFlat` (not `IndexHNSWFlat`) is the

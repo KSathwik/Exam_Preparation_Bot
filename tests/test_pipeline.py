@@ -128,13 +128,6 @@ def test_answer_question_handles_llm_failure_gracefully(bot, mock_llm):
     assert result.overall_confidence == 0.0
 
 
-def test_reset_clears_history_and_delegates_to_vector_store(bot, mock_vector_store_manager):
-    bot.chat_history.append(MagicMock())
-    bot.reset()
-    assert bot.chat_history == []
-    mock_vector_store_manager.reset.assert_called_once()
-
-
 def test_get_stats(bot, mock_vector_store_manager):
     stats = bot.get_stats()
     assert stats["vector_store"] == mock_vector_store_manager.get_stats.return_value

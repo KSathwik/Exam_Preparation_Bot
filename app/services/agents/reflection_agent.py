@@ -1,10 +1,11 @@
 """ReflectionAgent — always-on quality-control pass wrapping `_BaseLLM.reflect_on_answer`."""
 
-from typing import List
+from typing import List, Optional
 
 from loguru import logger
 
-from ..models import QueryType, RetrievedChunk
+from ..models import ChatMessage, QueryType, RetrievedChunk
+from ..response_formats import ResponseFormat
 
 
 class ReflectionAgent:
@@ -26,10 +27,18 @@ class ReflectionAgent:
         draft_answer: str,
         validator_summary: str,
         intent: QueryType,
+        response_format: ResponseFormat = ResponseFormat.GENERAL,
+        history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         try:
             return self.llm.reflect_on_answer(
-                query, retrieved_chunks, draft_answer, validator_summary, intent
+                query,
+                retrieved_chunks,
+                draft_answer,
+                validator_summary,
+                intent,
+                response_format=response_format,
+                history=history,
             )
         except Exception as exc:
             logger.warning(

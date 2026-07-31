@@ -26,3 +26,6 @@ class RetrievalAgent:
         session_id: Optional[str] = None,
     ) -> dict:
         return self.retriever.search(query, intent, top_k, document_ids=document_ids, session_id=session_id)
+
+    def get_full_context(self, document_ids: List[str]) -> dict:
+        return self.retriever.get_full_context(document_ids)

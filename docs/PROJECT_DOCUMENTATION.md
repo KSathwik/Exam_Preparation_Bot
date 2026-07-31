@@ -293,7 +293,6 @@ discriminated by a `content_type` field (`"document"` | `"memory"`) in each entr
 | GET | `/api/history` | ✓ | Retrieve chat history |
 | DELETE | `/api/history` | ✓ | Clear chat history |
 | POST | `/api/search` | ✓ | Raw retrieval (no LLM call) — debugging/inspection |
-| POST | `/api/system/reset` | ✓ | Reset the bot (clears history + vector store) |
 | GET | `/api/system/config` | – | Public-safe runtime config summary |
 | GET | `/api/metrics` | ✓ | Vector store / chat history / model metrics |
 

@@ -19,7 +19,15 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
-    workers: int = 4
+    # Every heavy resource (VectorStoreManager, its FAISS index + lock,
+    # ExamPrepBot.chat_history) is a process-local @lru_cache singleton —
+    # >1 worker means >1 independent process each loading its own copy of
+    # the index, with no cross-process coordination on save_index()/
+    # load_index(). That silently corrupts the on-disk index (two workers'
+    # writes racing) and desyncs chat_history/rate-limit counters across
+    # requests. Real multi-worker support needs cross-process locking or a
+    # proper vector DB — until then this must stay 1.
+    workers: int = 1
 
     # CORS — restrict in production; wildcard kept only for local dev
     cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
@@ -104,6 +112,36 @@ class Settings(BaseSettings):
     # Intent Classification
     intent_classification_threshold: float = 0.7
     intent_embedding_model: str = "all-MiniLM-L6-v2"
+
+    # Reflection short-circuit — reflection (ReflectionAgent) is a full second
+    # LLM round-trip on top of drafting, so paying for it when the draft
+    # already looks unrescuable means the user waits through two LLM calls
+    # just to land on the same hard-blocked fallback one call would have
+    # produced (observed: 60s+ for a query that was always going to end in
+    # "couldn't verify this"). Deliberately narrow: citation_rate==0 alone
+    # isn't enough to skip on — reflection legitimately re-grounds a mediocre
+    # draft into one with real citations often enough that skipping every
+    # zero-citation draft would give up genuine rescues, not just latency.
+    # Only skip when confidence is *also* already far below the hard-block
+    # floor (see orchestrator.py's own 0.3), i.e. the retrieved chunks looked
+    # weak too, not just the draft's phrasing — same spirit as that floor's
+    # own "leave a wide margin for normal variance" reasoning, just applied
+    # one stage earlier and stricter.
+    enable_reflection_shortcut: bool = True
+    reflection_shortcut_confidence_floor: float = 0.15
+
+    # Hybrid RAG + CAG — when a conversation's resolved document scope is
+    # small enough (see context_router.py), skip similarity-ranked retrieval
+    # entirely and give the drafting LLM every chunk of every scoped document
+    # instead of a ranked top_k subset. Strictly better whenever it fits: no
+    # ranking-induced risk of dropping a chunk the answer needed. Falls back
+    # to the existing RAG path unchanged whenever the scope exceeds the
+    # budget. Budget is conservative on purpose — leaves headroom under
+    # typical provider context windows once system prompt, conversation
+    # history, and generation budget are accounted for; a word-count proxy
+    # (see context_router._estimate_tokens), not a real tokenizer.
+    enable_cag: bool = True
+    cag_token_budget: int = 6000
 
     # Caching
     enable_query_cache: bool = True
