@@ -7,7 +7,9 @@ import { getApiKey, setApiKey, getStats } from "./api.js";
 
 function highlightThemeControl(choice) {
   document.querySelectorAll("#themeControl button").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.themeChoice === choice);
+    const isActive = btn.dataset.themeChoice === choice;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-pressed", String(isActive));
   });
 }
 

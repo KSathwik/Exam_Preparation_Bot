@@ -63,6 +63,7 @@ class MemoryAgent:
         query: str,
         answer: str,
         intent: Optional[QueryType] = None,
+        format_type: Optional[str] = None,
         session_id: Optional[str] = None,
         device_id: Optional[str] = None,
     ) -> None:
@@ -80,13 +81,52 @@ class MemoryAgent:
             # different conversations. self.session_id is only a fallback
             # default, kept for backward compatibility with direct construction.
             resolved_session_id = session_id or self.session_id
-            self._persist_turn(query, answer, intent, resolved_session_id, device_id)
+            self._persist_turn(query, answer, intent, format_type, resolved_session_id, device_id)
+
+    def get_recent_turns(self, session_id: Optional[str], max_messages: int = 6) -> List[ChatMessage]:
+        """Return the last ``max_messages`` (user+assistant combined) for this
+        conversation, oldest-first, to thread into the drafting/reflection
+        prompts as short-term context. Returns ``[]`` when persistence isn't
+        configured or there's no session_id — ``self.chat_history`` is a
+        single list shared across every conversation this process has ever
+        handled (not scoped by session), so it's not a safe fallback source
+        here; without a real session to query, there's no reliable per-
+        conversation history to draw from at all."""
+        if not (self.persist and session_id and self.db_session_factory):
+            return []
+        db = None
+        try:
+            db = self.db_session_factory()
+            rows = (
+                db.query(ChatMessageRecord)
+                .filter_by(session_id=session_id)
+                .order_by(ChatMessageRecord.id.desc())
+                .limit(max_messages)
+                .all()
+            )
+            rows.reverse()
+            return [
+                ChatMessage(
+                    role=r.role,
+                    content=r.content,
+                    timestamp=r.created_at.isoformat() if r.created_at else "",
+                    intent_type=QueryType(r.intent) if r.intent else None,
+                )
+                for r in rows
+            ]
+        except Exception as exc:
+            logger.warning(f"[MEMORY] Failed to fetch recent turns for context: {type(exc).__name__}: {exc}")
+            return []
+        finally:
+            if db is not None:
+                db.close()
 
     def _persist_turn(
         self,
         query: str,
         answer: str,
         intent: Optional[QueryType],
+        format_type: Optional[str],
         session_id: Optional[str],
         device_id: Optional[str] = None,
     ) -> None:
@@ -129,6 +169,7 @@ class MemoryAgent:
                 role="assistant",
                 content=answer,
                 intent=intent_value,
+                format_type=format_type,
                 token_count=assistant_tokens,
             )
             db.add(assistant_msg)

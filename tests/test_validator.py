@@ -127,6 +127,17 @@ class TestConfidenceScorer:
         risk = scorer.assess_hallucination_risk(chunks, [], 5)
         assert risk == "high"
 
+    def test_zero_claims_not_automatically_high_risk(self):
+        """assess_hallucination_risk's citation_rate default for num_claims=0
+        must agree with calculate_answer_confidence's (0.5, neutral) — it
+        used to default to 0.0 here specifically, which silently forced
+        every zero-claim answer (nothing to fact-check, not necessarily
+        ungrounded) into "high" risk regardless of chunk relevance."""
+        scorer = ConfidenceScorer()
+        chunks = [_make_chunk("text", relevance=0.9)]
+        risk = scorer.assess_hallucination_risk(chunks, [], 0)
+        assert risk != "high"
+
     def test_multi_page_answer_not_harshly_penalized(self):
         """Drawing on several distinct pages is breadth, not a sign of poor
         grounding — a well-cited answer spanning 5 pages should still land

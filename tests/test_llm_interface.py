@@ -17,6 +17,7 @@ from app.services.llm_interface import (
     _OpenAILLM,
 )
 from app.services.models import ChatMessage, ChunkMetadata, QueryType, RetrievedChunk
+from app.services.response_formats import ResponseFormat
 
 
 @pytest.fixture(autouse=True)
@@ -171,6 +172,28 @@ def test_generate_answer_with_claims_tolerates_plain_string_claims(monkeypatch):
     }
 
 
+def test_generate_answer_with_claims_repairs_unescaped_newlines_in_answer(monkeypatch):
+    """A heading/list-heavy Markdown answer (e.g. KEY_POINTS, DETAILED_EXPLANATION)
+    commonly contains literal newlines between paragraphs/list items that the
+    model doesn't reliably escape as \\n despite being told to — a raw control
+    character inside a JSON string is invalid and previously broke json.loads
+    for the *whole* object, leaking the raw JSON envelope as the visible
+    answer (found via live smoke testing of the response-formatting pass)."""
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    llm = ClaudeInterface()
+    raw_with_literal_newlines = (
+        '{"answer": "## Heading One\n- Point one\n- Point two\n\n## Heading Two\nMore text.", '
+        '"claims": [{"claim": "Point one", "chunks": [1]}]}'
+    )
+    llm._call = MagicMock(return_value=raw_with_literal_newlines)
+
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
+
+    assert result["answer"] == "## Heading One\n- Point one\n- Point two\n\n## Heading Two\nMore text."
+    assert result["claims"] == [{"claim": "Point one", "chunks": [1]}]
+
+
 def test_generate_answer_with_claims_recovers_answer_when_claims_malformed(monkeypatch):
     """A malformed claims array (e.g. an unescaped quote mark the model
     didn't escape) breaks whole-object json.loads — the answer field must
@@ -214,7 +237,9 @@ def test_generate_structured_answer_maps_format_type(monkeypatch):
         }
     )
 
-    result = llm.generate_structured_answer("What is a mitochondria?", [_chunk()], QueryType.DEFINITION)
+    result = llm.generate_structured_answer(
+        "What is a mitochondria?", [_chunk()], QueryType.DEFINITION, response_format=ResponseFormat.DEFINITION
+    )
     assert result["format_type"] == "definition"
     assert result["claims"] == [{"claim": "The mitochondria is the powerhouse of the cell.", "chunks": [1]}]
     assert result["intent"] == "definition"

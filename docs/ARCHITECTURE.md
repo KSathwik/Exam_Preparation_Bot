@@ -13,10 +13,15 @@ flowchart TB
     API --> Deps[app.core.dependencies<br/>DI singletons]
     Deps --> Bot[ExamPrepBot<br/>app/services/pipeline.py]
     Bot --> Orchestrator[OrchestratorAgent]
+    Orchestrator --> IntentC[IntentClassifier<br/>what it's about]
+    Orchestrator --> FormatC[FormatClassifier<br/>how it should look]
+    Orchestrator --> ContextR[ContextRouter<br/>RAG vs CAG]
     Orchestrator --> Retrieval[RetrievalAgent]
     Orchestrator --> Knowledge[KnowledgeAgent]
     Orchestrator --> Reflection[ReflectionAgent]
+    Orchestrator --> Formatter[response_formatter.format_response]
     Orchestrator --> Memory[MemoryAgent]
+    ContextR -.decides strategy.-> Retrieval
     Retrieval --> VSM[VectorStoreManager<br/>FAISS + BM25]
     Knowledge --> LLM[_BaseLLM<br/>Anthropic / OpenAI / Gemini]
     Reflection --> LLM
@@ -24,45 +29,76 @@ flowchart TB
     Memory -.persist=True only.-> VSM
 ```
 
+`IntentClassifier`, `FormatClassifier`, and `ContextRouter` are all deterministic, LLM-free decisions —
+none of them are agent routing (see below).
+
 ## Agent workflow (per query)
 
 `OrchestratorAgent.run()` is deterministic Python, not an LLM router — with only one downstream
 answer-producing agent this phase (Knowledge), there's nothing meaningful to route between yet.
-`IntentClassifier` already parameterizes the pipeline (top_k, prompt template, format_type); that's a
-different thing from agent selection. Real LLM-based routing becomes justified once Phase 2 agents
-(Quiz/StudyPlanner/...) exist to route between — see the roadmap doc.
+Three orthogonal, fully deterministic (no LLM call) decisions parameterize the pipeline instead:
+`IntentClassifier` (what the question is about — retrieval `top_k`/reranking), `FormatClassifier` (how
+the answer should look — drafting prompt template + final formatting), and `ContextRouter` (RAG vs CAG
+— ranked retrieval vs whole-document context). None of them is agent selection. Real LLM-based routing
+becomes justified once Phase 2 agents (Quiz/StudyPlanner/...) exist to route between — see the roadmap
+doc.
 
 ```mermaid
 sequenceDiagram
     participant O as OrchestratorAgent
     participant IC as IntentClassifier
+    participant FC as FormatClassifier
+    participant CR as ContextRouter
     participant R as RetrievalAgent
     participant K as KnowledgeAgent
     participant V as SpanExtractor/ConfidenceScorer
     participant Rf as ReflectionAgent
+    participant Ft as response_formatter
     participant M as MemoryAgent
 
     O->>IC: classify(query)
     IC-->>O: intent, confidence
-    O->>R: search(query, intent)
-    R-->>O: chunks, is_relevant
+    O->>FC: classify(query, intent)
+    FC-->>O: response_format
+    alt scoped to conversation document(s)
+        O->>R: get_full_context(document_ids)
+        R-->>O: all chunks (unranked)
+        O->>CR: decide(chunks)
+        CR-->>O: RAG | CAG
+    end
+    alt CAG chosen
+        Note over O,R: chunks already fetched above — reused as-is
+    else RAG (default, or CAG scope too large/absent)
+        O->>R: search(query, intent, document_ids)
+        R-->>O: chunks, is_relevant
+    end
     alt not is_relevant
         O-->>O: return out_of_scope fallback
     else in scope
-        O->>K: generate(query, chunks, intent)
+        O->>K: generate(query, chunks, intent, response_format)
         K-->>O: draft_answer, claims [{claim, chunks}]
         O->>V: score(claims, chunks)
         V-->>O: citations, confidence, hallucination_risk
-        O->>Rf: reflect(query, chunks, draft, validator_summary, intent)
-        Rf-->>O: revised_answer, materially_changed, should_block, issues
-        alt should_block
-            O-->>O: return reflection_blocked fallback
-        else materially_changed
-            O->>V: re-score(revised_claims, chunks)
-            V-->>O: updated citations/confidence
+        alt citation_rate==0 AND confidence << block floor
+            O-->>O: pre-reflection shortcut — return hard-block fallback, skip Rf entirely
+        else
+            O->>Rf: reflect(query, chunks, draft, validator_summary, intent, response_format)
+            Rf-->>O: revised_answer, materially_changed, should_block, issues
+            alt should_block
+                O-->>O: return reflection_blocked fallback
+            else materially_changed
+                O->>V: re-score(revised_claims, chunks)
+                V-->>O: updated citations/confidence
+            end
+            alt confidence < 0.3 OR citation_rate == 0
+                O-->>O: return hard-block fallback (hallucination-risk gate)
+            else
+                O->>Ft: format_response(final_answer, response_format)
+                Ft-->>O: cleaned final_answer
+                O->>M: record_turn(query, final_answer, intent, format_type)
+                O-->>O: return AnswerWithSources
+            end
         end
-        O->>M: record_turn(query, final_answer, intent)
-        O-->>O: return AnswerWithSources
     end
 ```
 
@@ -82,9 +118,32 @@ Additive only — the REST `/api/ask` response shape (`AnswerWithSources`/`Query
 | `error` | Any failure | `{"type": "error", "message": str}` |
 
 This is an honest two-stage progressive reveal (draft, then possibly-revised final) — not true
-token-level LLM streaming, which is out of scope this phase.
+token-level LLM streaming, which is out of scope this phase. `format_type`'s shape (a plain string) is
+unchanged since intent-driven formatting shipped — only its *value set* grew from a handful of
+intent-derived labels to ~20 `ResponseFormat` values (`key_points`, `summary`, `comparison`, `mcq`,
+`flashcards`, ...), so no frontend/schema change was needed to add it.
 
-## Retrieval pipeline
+## Hybrid RAG + CAG retrieval routing
+
+`ContextRouter.decide()` (called once per turn, only when the query resolves to a real, non-empty
+conversation document scope) picks between two retrieval strategies before either one runs — not a
+fallback chain, a decision made from a single already-fetched chunk list:
+
+```mermaid
+flowchart TB
+    Scope{Resolved document scope?} -->|none / global search| RAGPath[RAG path — see below]
+    Scope -->|non-empty| Fetch[get_chunks_by_document_ids<br/>all chunks, unranked, page+chunk_index order]
+    Fetch --> Budget{enable_cag AND<br/>estimated_tokens <= cag_token_budget?}
+    Budget -->|yes| CAGPath[CAG: hand every fetched chunk<br/>straight to the draft call]
+    Budget -->|no| RAGPath
+```
+
+Everything from Stage 3 (draft generation) onward is identical regardless of which branch produced the
+`List[RetrievedChunk]` — CAG is a second way to *populate* Stage 2's output, not a parallel pipeline.
+The real-world common case for this app is small documents (single-digit chunk counts per upload), so
+CAG is the typical path in practice, not RAG.
+
+## Retrieval pipeline (RAG path)
 
 ```mermaid
 flowchart LR
@@ -143,8 +202,8 @@ sequenceDiagram
     participant LLM as _BaseLLM
     participant VSM as VectorStoreManager
 
-    O->>M: record_turn(query, answer, intent)
-    M->>DB: insert ChatMessageRecord (user + assistant)<br/>token_count = running total
+    O->>M: record_turn(query, answer, intent, format_type)
+    M->>DB: insert ChatMessageRecord (user + assistant)<br/>token_count = running total<br/>format_type set on assistant row only
     M->>DB: session.turn_count += 1
     alt turn_count % N == 0  OR  tokens since last summary >= threshold
         M->>DB: fetch messages since last_summarized_message_id

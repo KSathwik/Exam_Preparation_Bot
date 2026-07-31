@@ -111,7 +111,17 @@ function startRename(li, convo) {
   input.focus();
   input.select();
 
+  // Escape doesn't blur the input, so it stays focused/in the DOM while
+  // refreshConversationList()'s network round-trip is in flight — if the
+  // user then clicks elsewhere, the still-attached blur listener would fire
+  // commit() with the very text Escape was meant to discard. `settled`
+  // makes cancel-then-commit and commit-then-cancel both no-ops the second
+  // time, regardless of which fires first.
+  let settled = false;
+
   const commit = async () => {
+    if (settled) return;
+    settled = true;
     const newTitle = input.value.trim();
     if (newTitle && newTitle !== convo.title) {
       // Optimistic: reflect the new title immediately, don't wait on the
@@ -128,9 +138,15 @@ function startRename(li, convo) {
     refreshConversationList();
   };
 
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    refreshConversationList();
+  };
+
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); input.blur(); }
-    if (e.key === "Escape") { e.preventDefault(); refreshConversationList(); }
+    if (e.key === "Escape") { e.preventDefault(); cancel(); }
   });
   input.addEventListener("blur", commit, { once: true });
 }
@@ -206,8 +222,12 @@ export function startNewChat() {
 }
 
 function closeSidebarOnMobile() {
-  document.getElementById("sidebar").classList.remove("sidebar-open");
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar.classList.contains("sidebar-open")) return;
+  sidebar.classList.remove("sidebar-open");
   document.getElementById("sidebarBackdrop").classList.remove("visible");
+  document.getElementById("chatColumn").removeAttribute("inert");
+  document.getElementById("sidebarToggleBtn").focus();
 }
 
 export async function initSidebar() {
@@ -217,8 +237,19 @@ export async function initSidebar() {
   searchInput.addEventListener("input", applySearchFilter);
 
   document.getElementById("sidebarToggleBtn").addEventListener("click", () => {
-    document.getElementById("sidebar").classList.add("sidebar-open");
+    const sidebar = document.getElementById("sidebar");
+    sidebar.classList.add("sidebar-open");
     document.getElementById("sidebarBackdrop").classList.add("visible");
+    // Keyboard/screen-reader users could otherwise Tab straight through the
+    // open drawer into the (visually hidden-behind-it) chat column — trap
+    // focus in the drawer while it's open and move focus into it.
+    document.getElementById("chatColumn").setAttribute("inert", "");
+    sidebar.querySelector("button, [href], input, [tabindex]")?.focus();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("sidebar").classList.contains("sidebar-open")) {
+      closeSidebarOnMobile();
+    }
   });
   document.getElementById("sidebarBackdrop").addEventListener("click", closeSidebarOnMobile);
   document.addEventListener("click", (e) => {

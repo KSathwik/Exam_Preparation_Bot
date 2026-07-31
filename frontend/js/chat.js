@@ -5,6 +5,7 @@
 import { state, setSessionId, newConversationId, setDocumentIds } from "./state.js";
 import { buildWsUrl, listDocuments } from "./api.js";
 import { renderMarkdown, escapeText, renderMathIn } from "./markdown.js";
+import { buildResearchControl } from "./continueResearch.js";
 
 let messagesBox;
 let jumpBtn;
@@ -39,6 +40,16 @@ function reflectScroll() {
   } else {
     jumpBtn.hidden = false;
   }
+}
+
+// Used by the sidebar AI Hub (see aiHub.js), which isn't tied to any one
+// message row — it needs "whatever the student was just asking about" in
+// the active conversation, so the row DOM itself (dataset.text, set in
+// buildUserRow) is the simplest source of truth, no extra state to thread.
+export function getLastUserQuery() {
+  const rows = messagesBox.querySelectorAll(".message-row.user");
+  const last = rows[rows.length - 1];
+  return last ? last.dataset.text || "" : "";
 }
 
 export function clearMessages() {
@@ -165,6 +176,17 @@ function renderSourcesHtml(sources) {
   return `<details class="sources-disclosure"><summary>Sources (${sources.length})</summary>${items}</details>`;
 }
 
+// Study chips must track the actual most-recent assistant reply, not just
+// "the last .message-row in the DOM" — a pure CSS :last-child selector
+// silently breaks the moment anything else (e.g. an upload's system
+// message) gets appended after the answer, which is a completely normal
+// mid-conversation flow. Tracked explicitly via a class toggle instead.
+function markLatestAssistantRow(row) {
+  const previous = messagesBox.querySelector(".message-row.assistant.is-latest-assistant");
+  if (previous && previous !== row) previous.classList.remove("is-latest-assistant");
+  row.classList.add("is-latest-assistant");
+}
+
 function buildAssistantRow(query) {
   const row = document.createElement("div");
   row.className = "message-row assistant";
@@ -200,10 +222,13 @@ function buildAssistantRow(query) {
   wireCopyButton(copyBtn, () => row.dataset.finalText || bubble.textContent || "");
   const regenBtn = actionButton("↻", "Regenerate");
   regenBtn.addEventListener("click", () => regenerate(row));
-  actions.append(copyBtn, regenBtn);
+  // Only ever revealed once a response has actually finished (see the
+  // "complete" WS handler and renderHistory below) — never while streaming.
+  const researchControl = buildResearchControl(() => row.dataset.query);
+  actions.append(copyBtn, regenBtn, researchControl);
   row.appendChild(actions);
 
-  return { row, intentEl, bubble, meta, suggestions, studyChips };
+  return { row, intentEl, bubble, meta, suggestions, studyChips, researchControl };
 }
 
 const STUDY_TOOLS = [
@@ -242,16 +267,24 @@ export function renderHistory(messages) {
       messagesBox.appendChild(buildUserRow(m.content));
       lastUserQuery = m.content;
     } else {
-      const { row, intentEl, bubble, studyChips } = buildAssistantRow(lastUserQuery);
-      if (m.intent) {
+      const { row, intentEl, bubble, studyChips, researchControl } = buildAssistantRow(lastUserQuery);
+      const isGreeting = m.format_type === "greeting";
+      if (m.intent && !isGreeting) {
         intentEl.hidden = false;
         intentEl.textContent = m.intent;
       }
       bubble.innerHTML = renderMarkdown(m.content);
       renderMathIn(bubble);
       row.dataset.finalText = m.content;
-      populateStudyChips(studyChips, lastUserQuery);
+      // A replayed greeting gets the same treatment as a live one (see the
+      // "complete" WS handler) — intent label, study chips, and "Open in"
+      // are meaningless noise on "Hello!".
+      if (!isGreeting) {
+        populateStudyChips(studyChips, lastUserQuery);
+        researchControl.hidden = false; // history entries are already-complete responses
+      }
       messagesBox.appendChild(row);
+      markLatestAssistantRow(row);
     }
   }
   reflectScroll();
@@ -355,6 +388,11 @@ function setComposerStreaming(streaming) {
   sendBtn.textContent = streaming ? "■" : "➤";
   sendBtn.title = streaming ? "Stop generating" : "Send";
   input.disabled = streaming;
+  // A live region re-announcing every ~40-character chunk floods a screen
+  // reader with partial-word fragments. Suppress announcements while
+  // streaming; restoring "polite" right as the turn settles means the
+  // final, complete answer still gets announced once, cleanly.
+  messagesBox.setAttribute("aria-live", streaming ? "off" : "polite");
 }
 
 export function stopStreaming() {
@@ -398,8 +436,10 @@ function resetAssistantRowForStreaming(row, query) {
   studyChips.innerHTML = "";
   const intentEl = row.querySelector(".message-intent");
   intentEl.hidden = true;
+  const researchControl = row.querySelector(".research-control");
+  researchControl.hidden = true; // hide again until the re-run response completes
   row.dataset.query = query;
-  return { row, intentEl, bubble, meta, suggestions, studyChips };
+  return { row, intentEl, bubble, meta, suggestions, studyChips, researchControl };
 }
 
 export function sendQuery(text, opts) {
@@ -420,17 +460,30 @@ export function sendQuery(text, opts) {
   let built;
   if (options.reuseRow) {
     built = resetAssistantRowForStreaming(options.reuseRow, query);
-  } else if (editRow && editRow.isConnected && editRow.nextElementSibling?.dataset.role === "assistant") {
-    // Edit-and-resend: update the edited message in place and regenerate
-    // only its paired reply, matching ChatGPT/Claude's edit behavior —
-    // never append a duplicate of the old exchange below it.
+  } else if (editRow && editRow.isConnected) {
+    // Edit-and-resend: update the edited message in place, matching
+    // ChatGPT/Claude's edit behavior — never append a duplicate of the old
+    // exchange below it. Normally reuses the paired assistant reply right
+    // after it, but that pairing isn't guaranteed (a dropped connection, a
+    // reload mid-turn, or editing a message that never got a reply yet can
+    // all leave a user message with no assistant sibling) — insert a fresh
+    // reply row directly after the edited message in that case, rather than
+    // falling through to the generic append path below, which would leave
+    // the stale original text visible above a brand-new duplicate exchange.
     editRow.dataset.text = query;
     editRow.querySelector(".message-bubble").textContent = query;
-    built = resetAssistantRowForStreaming(editRow.nextElementSibling, query);
+    if (editRow.nextElementSibling?.dataset.role === "assistant") {
+      built = resetAssistantRowForStreaming(editRow.nextElementSibling, query);
+    } else {
+      built = buildAssistantRow(query);
+      editRow.after(built.row);
+      markLatestAssistantRow(built.row);
+    }
   } else {
     messagesBox.appendChild(buildUserRow(query));
     built = buildAssistantRow(query);
     messagesBox.appendChild(built.row);
+    markLatestAssistantRow(built.row);
   }
   reflectScroll();
 
@@ -443,6 +496,7 @@ export function sendQuery(text, opts) {
     meta: built.meta,
     suggestions: built.suggestions,
     studyChips: built.studyChips,
+    researchControl: built.researchControl,
     query,
     finalText: "",
     settled: false,
@@ -508,8 +562,16 @@ export function sendQuery(text, opts) {
       // answer — drafting and reflection both happen silently server-side
       // first (see OrchestratorAgent.run), so there's nothing to distinguish
       // here and no risk of the shown text ever getting replaced mid-stream.
+      //
+      // Plain escaped text during the stream, not a full markdown/DOMPurify
+      // pass — re-parsing the ENTIRE accumulated answer on every ~40-char
+      // chunk (dozens of times for a long answer) is wasted O(n²) work for
+      // an intermediate view that gets fully replaced on "complete" anyway
+      // (below). Markdown/code/math rendering only has to happen once, on
+      // the final text.
       c.finalText += data.text;
-      c.bubble.innerHTML = renderMarkdown(c.finalText) + '<span class="stream-cursor" aria-hidden="true"></span>';
+      c.bubble.innerHTML =
+        escapeText(c.finalText).replace(/\n/g, "<br>") + '<span class="stream-cursor" aria-hidden="true"></span>';
       reflectScroll();
     } else if (data.type === "complete") {
       c.settled = true;
@@ -521,12 +583,17 @@ export function sendQuery(text, opts) {
 
       if (data.format_type === "greeting") {
         // A canned small-talk reply — the intent label (shown before we knew
-        // this was small talk) plus confidence/risk/citation badges and
-        // study-tool chips are all meaningless noise on "Hello!".
+        // this was small talk) plus confidence/risk/citation badges, study-
+        // tool chips, and "Continue Research" are all meaningless noise on
+        // "Hello!".
         c.intentEl.hidden = true;
         c.meta.hidden = true;
         c.meta.innerHTML = "";
+        c.researchControl.hidden = true;
       } else {
+        // Smart Visibility: only ever reveal "Continue Research" once a
+        // response has actually finished — never while streaming/thinking.
+        c.researchControl.hidden = false;
         c.meta.hidden = false;
         const confidenceBadge = `<span class="badge ${confidenceBadgeClass(data.confidence)}">${data.confidence != null ? Math.round(data.confidence * 100) + "% confidence" : "confidence n/a"}</span>`;
         const riskBadge = `<span class="badge ${riskBadgeClass(data.hallucination_risk)}">${data.hallucination_risk || "unknown"} risk</span>`;

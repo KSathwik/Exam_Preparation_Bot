@@ -195,6 +195,35 @@ def test_websocket_forwards_document_ids(client, mock_bot):
     assert call_kwargs["device_id"] is None
 
 
+def test_websocket_rejects_malformed_document_ids(client, mock_bot):
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "What is X?", "document_ids": "not-a-list"}')
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    assert "document_ids" in msg["message"]
+    mock_bot.answer_question.assert_not_called()
+
+
+def test_websocket_rejects_document_ids_with_non_string_entries(client, mock_bot):
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "What is X?", "document_ids": [123, "doc-2"]}')
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    mock_bot.answer_question.assert_not_called()
+
+
+def test_websocket_rejects_overlong_query(client, mock_bot):
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "%s"}' % ("a" * 1001))
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    assert "1000" in msg["message"]
+    mock_bot.answer_question.assert_not_called()
+
+
 def test_search_documents(client, monkeypatch, mock_intent_classifier):
     monkeypatch.setattr(queries_module, "get_vector_store_manager", lambda: MagicMock())
 

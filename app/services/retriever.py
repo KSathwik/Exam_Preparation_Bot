@@ -223,3 +223,23 @@ class HybridRetriever:
             "relevance_score": relevance_score,
             "total_retrieved": len(chunks),
         }
+
+    def get_full_context(self, document_ids: List[str]) -> dict:
+        """CAG path — every chunk of every document in ``document_ids``, in
+        reading order, no ranking/truncation. Mirrors search()'s return shape
+        so callers (OrchestratorAgent) don't need a different code path to
+        handle the result, just a different call to produce it. is_relevant
+        is True whenever the scope has any indexed content at all — no
+        relevance_threshold applies, since these documents were explicitly
+        uploaded to this conversation, not found by a similarity search."""
+        chunks = self.adaptive.vector_store.get_chunks_by_document_ids(document_ids)
+        is_relevant = bool(chunks)
+        return {
+            "query": None,
+            "intent": None,
+            "chunks": chunks,
+            "in_scope": is_relevant,
+            "is_relevant": is_relevant,
+            "relevance_score": 1.0 if chunks else 0.0,
+            "total_retrieved": len(chunks),
+        }

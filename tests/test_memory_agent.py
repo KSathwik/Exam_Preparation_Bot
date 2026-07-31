@@ -263,3 +263,59 @@ def test_record_turn_session_id_override_takes_precedence_over_constructor_value
     assert db.get(ChatSession, "call-sess") is not None
     assert db.get(ChatSession, "ctor-sess") is None
     db.close()
+
+
+# ── get_recent_turns (short-term conversation context for the LLM calls) ──
+
+
+def test_get_recent_turns_returns_chronological_order(db_session_factory):
+    agent = MemoryAgent([], persist=True, db_session_factory=db_session_factory)
+    agent.record_turn("First question", "First answer", session_id="sess-1")
+    agent.record_turn("Second question", "Second answer", session_id="sess-1")
+
+    turns = agent.get_recent_turns("sess-1")
+
+    assert [t.content for t in turns] == [
+        "First question",
+        "First answer",
+        "Second question",
+        "Second answer",
+    ]
+    assert [t.role for t in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_get_recent_turns_respects_max_messages(db_session_factory):
+    agent = MemoryAgent([], persist=True, db_session_factory=db_session_factory)
+    for i in range(5):
+        agent.record_turn(f"question {i}", f"answer {i}", session_id="sess-1")
+
+    turns = agent.get_recent_turns("sess-1", max_messages=4)
+
+    assert len(turns) == 4
+    # Most recent 2 turns (4 messages), still oldest-first within that window.
+    assert [t.content for t in turns] == ["question 3", "answer 3", "question 4", "answer 4"]
+
+
+def test_get_recent_turns_scoped_to_the_right_session(db_session_factory):
+    agent = MemoryAgent([], persist=True, db_session_factory=db_session_factory)
+    agent.record_turn("Session A question", "Session A answer", session_id="sess-a")
+    agent.record_turn("Session B question", "Session B answer", session_id="sess-b")
+
+    turns = agent.get_recent_turns("sess-a")
+
+    assert [t.content for t in turns] == ["Session A question", "Session A answer"]
+
+
+def test_get_recent_turns_returns_empty_without_persist_or_session_id(db_session_factory):
+    persisted_agent = MemoryAgent([], persist=True, db_session_factory=db_session_factory)
+    agent_not_persisting = MemoryAgent([], persist=False, db_session_factory=db_session_factory)
+
+    assert persisted_agent.get_recent_turns(None) == []
+    assert agent_not_persisting.get_recent_turns("sess-1") == []
+
+
+def test_get_recent_turns_handles_db_failure_gracefully():
+    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=MagicMock())
+    agent.db_session_factory.side_effect = RuntimeError("db down")
+
+    assert agent.get_recent_turns("sess-1") == []

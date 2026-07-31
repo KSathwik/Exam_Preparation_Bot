@@ -15,7 +15,6 @@ from tests.conftest import TEST_API_KEY
 PROTECTED_ENDPOINTS = [
     ("get", "/api/documents/list"),
     ("get", "/api/documents/stats"),
-    ("post", "/api/system/reset"),
     ("get", "/api/metrics"),
     ("get", "/logs/tail"),
     ("get", "/api/history"),

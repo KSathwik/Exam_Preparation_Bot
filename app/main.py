@@ -135,17 +135,6 @@ async def root():
 
 
 # System endpoints
-@app.post("/api/system/reset", tags=["System"], dependencies=[Depends(require_api_key)])
-async def reset_system():
-    from fastapi.concurrency import run_in_threadpool
-
-    from app.core.dependencies import get_bot
-
-    bot = get_bot()
-    await run_in_threadpool(bot.reset)
-    return {"status": "success", "message": "Bot reset successfully"}
-
-
 @app.get("/api/system/config", tags=["System"])
 async def get_system_config():
     return {

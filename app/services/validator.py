@@ -118,7 +118,13 @@ class ConfidenceScorer:
         # were calibrated as if confidence commonly approached 1.0, which
         # pushed nearly everything into "high" regardless of actual quality.
         confidence = self.calculate_answer_confidence(retrieved_chunks, citations, num_claims)
-        citation_rate = len(citations) / max(1, num_claims) if num_claims > 0 else 0.0
+        # Must agree with calculate_answer_confidence's own citation_rate
+        # default (0.5, "neutral" — nothing to verify isn't the same as
+        # failing to verify) — this used to default to 0.0 here, silently
+        # forcing every zero-claim answer (e.g. a purely stylistic rewrite
+        # with no factual content to cite) into "high" risk regardless of
+        # how well-grounded the underlying chunks/confidence actually were.
+        citation_rate = min(1.0, len(citations) / max(1, num_claims)) if num_claims > 0 else 0.5
         if confidence > 0.7 and citation_rate > 0.7:
             return "low"
         if confidence > 0.45 and citation_rate > 0.4:

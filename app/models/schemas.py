@@ -87,6 +87,7 @@ class ChatMessageOut(BaseModel):
     content: str
     timestamp: str
     intent: Optional[str] = None
+    format_type: Optional[str] = None
 
 
 # ── Conversations ────────────────────────────────────────────────────

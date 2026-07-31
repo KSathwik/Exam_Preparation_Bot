@@ -184,6 +184,60 @@ def test_remove_document_delegates_to_vector_store(manager):
     assert manager.vector_store.get_size() == 0
 
 
+def test_get_chunks_by_document_ids_returns_only_requested_documents(manager):
+    manager.add_document(_document(chunk_count=2), document_id="doc-1")
+    manager.add_document(_document(chunk_count=3), document_id="doc-2")
+
+    chunks = manager.get_chunks_by_document_ids(["doc-1"])
+
+    assert len(chunks) == 2
+    assert all(c.content in ("chunk 0", "chunk 1") for c in chunks)
+
+
+def test_get_chunks_by_document_ids_combines_multiple_documents(manager):
+    manager.add_document(_document(chunk_count=2), document_id="doc-1")
+    manager.add_document(_document(chunk_count=3), document_id="doc-2")
+
+    chunks = manager.get_chunks_by_document_ids(["doc-1", "doc-2"])
+
+    assert len(chunks) == 5
+
+
+def test_get_chunks_by_document_ids_sorts_by_page_then_chunk_index(manager):
+    chunks_in = [
+        DocumentChunk(
+            content="third",
+            metadata=ChunkMetadata(page_number=2, chunk_index=0, total_chunks=3, file_name="d.pdf"),
+        ),
+        DocumentChunk(
+            content="first",
+            metadata=ChunkMetadata(page_number=1, chunk_index=0, total_chunks=3, file_name="d.pdf"),
+        ),
+        DocumentChunk(
+            content="second",
+            metadata=ChunkMetadata(page_number=1, chunk_index=1, total_chunks=3, file_name="d.pdf"),
+        ),
+    ]
+    doc = Document(
+        file_name="d.pdf",
+        file_type="pdf",
+        file_size_bytes=100,
+        total_chunks=3,
+        chunks=chunks_in,
+        upload_timestamp="2024-01-01T00:00:00",
+    )
+    manager.add_document(doc, document_id="doc-1")
+
+    chunks = manager.get_chunks_by_document_ids(["doc-1"])
+
+    assert [c.content for c in chunks] == ["first", "second", "third"]
+
+
+def test_get_chunks_by_document_ids_empty_scope_returns_empty_list(manager):
+    manager.add_document(_document(), document_id="doc-1")
+    assert manager.get_chunks_by_document_ids(["nonexistent-doc"]) == []
+
+
 def test_reset_clears_and_persists_across_reload(manager):
     manager.add_document(_document(), document_id="doc-1")
     assert manager.vector_store.get_size() == 2
@@ -263,6 +317,46 @@ def test_search_with_document_ids_excludes_unlisted_documents(manager):
 
     results = manager.search("anything", top_k=5, document_ids=["doc-3"])
     assert results == []
+
+
+def test_search_with_document_ids_scans_full_index_not_a_bounded_window(manager, monkeypatch):
+    """A fixed top_k*5-ish fetch window ranks candidates globally *before*
+    filtering by document_id — once enough other documents are indexed, a
+    genuinely relevant chunk from the scoped document can rank outside that
+    window and post-hoc filtering finds nothing even though the content
+    exists. document_ids must trigger a full-index scan instead."""
+    manager.add_document(_document(chunk_count=1), document_id="doc-1")
+
+    real_search = manager.vector_store.search
+    captured = {}
+
+    def spy_search(query_embedding, k):
+        captured["k"] = k
+        return real_search(query_embedding, k)
+
+    monkeypatch.setattr(manager.vector_store, "search", spy_search)
+    manager.search("anything", top_k=5, document_ids=["doc-1"])
+
+    assert captured["k"] == manager.vector_store.get_size()
+
+
+def test_search_without_scoping_uses_bounded_fetch_window(manager, monkeypatch):
+    """Confirms the full-scan behavior above is specific to document_ids/
+    session_ids scoping — an ordinary unscoped search still uses the smaller
+    top_k-derived window, not a full scan every time."""
+    manager.add_document(_document(chunk_count=1), document_id="doc-1")
+
+    real_search = manager.vector_store.search
+    captured = {}
+
+    def spy_search(query_embedding, k):
+        captured["k"] = k
+        return real_search(query_embedding, k)
+
+    monkeypatch.setattr(manager.vector_store, "search", spy_search)
+    manager.search("anything", top_k=5)
+
+    assert captured["k"] == min(manager.vector_store.get_size(), 50)
 
 
 # ── Hybrid retrieval: BM25 lexical signal blended with dense similarity ──

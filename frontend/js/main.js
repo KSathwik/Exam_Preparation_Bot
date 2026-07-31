@@ -3,6 +3,7 @@ import { initChat } from "./chat.js";
 import { initSidebar } from "./sidebar.js";
 import { initInput } from "./input.js";
 import { initSettings } from "./settings.js";
+import { initAiHub } from "./aiHub.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -10,4 +11,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initInput();
   initSettings();
   initSidebar();
+  initAiHub();
 });

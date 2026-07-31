@@ -102,10 +102,15 @@ class ChatMessageRecord(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(36), ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(String(36), ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(16), nullable=False)
     content = Column(Text, nullable=False)
     intent = Column(String(32), nullable=True)
+    # The presentation format (e.g. "key_points", "greeting", "mcq" — see
+    # response_formats.py) — persisted so history replay can restore
+    # format-driven UI behavior (e.g. suppressing badges on a replayed
+    # greeting) rather than only ever having it live during the original turn.
+    format_type = Column(String(32), nullable=True)
     # Running total (not per-message length) so the token-threshold half of
     # the dual summarization trigger is also an O(1) read.
     token_count = Column(Integer, nullable=True)
@@ -122,7 +127,7 @@ class ConversationMemory(Base):
     __tablename__ = "conversation_memories"
 
     id = Column(String(36), primary_key=True)
-    session_id = Column(String(36), ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(String(36), ForeignKey("chat_sessions.id"), nullable=False, index=True)
     # Denormalized alongside session.user_id: same forward-compat rationale,
     # and lets memory lookups filter by user without a join once real
     # multi-user auth lands.

@@ -9,9 +9,16 @@ from the model's general knowledge alone.
 - Persistent, per-browser conversation history — auto-titled, searchable, renameable, deletable
 - Streaming answers with live progress ("Searching your documents…" → "Drafting an answer…" →
   "Reviewing the draft…") instead of a silent multi-second wait
-- Markdown, syntax-highlighted code, and LaTeX math rendering in every response
+- **Intent-driven, not prompt-driven**: a deterministic format classifier detects what shape of
+  answer you actually want — key points, a summary, revision notes, a comparison table, flashcards,
+  MCQs, one-line/two/five/ten-mark exam answers, and more — from ordinary phrasing ("in 5 points",
+  "TL;DR", "one line answer", "compare X and Y"), no format menu required
+- Markdown, syntax-highlighted code, tables, and LaTeX math rendering in every response
 - Copy / regenerate / edit / stop on every message, plus contextual "Summarize" / "Explain simpler" /
   "Explain in detail" follow-up chips under the latest answer
+- **AI Hub** sidebar section (ChatGPT/Claude/Gemini/Perplexity + Wikipedia) and a per-message
+  "Open in" action — continue researching a question in another AI or a trusted knowledge source in
+  one click, opened in a new tab with the question carried over wherever the provider supports it
 - Retrieval scoped to the document(s) uploaded in the current conversation first, so answers stay
   grounded in what you just asked about instead of blending in unrelated older uploads
 - Small talk ("hi", "thanks", "bye") is answered instantly with a generic reply, never routed through
@@ -21,14 +28,23 @@ from the model's general knowledge alone.
 **Underneath**
 - Multi-agent RAG pipeline (Orchestrator → Retrieval → Knowledge → Reflection → Memory), with an
   always-on reflection pass that re-checks every draft against the source excerpts before it's shown
-- Hybrid retrieval — dense (FAISS) + lexical (BM25) — with optional cross-encoder reranking
-- Per-claim citation extraction, confidence scoring, and hallucination-risk assessment (no LLM call)
+- **Hybrid RAG + CAG retrieval**: when a conversation's uploaded document(s) are small enough to fit
+  an LLM call economically, the whole document goes straight into context instead of a
+  similarity-ranked chunk subset — no risk of retrieval dropping a chunk the answer needed. Falls
+  back to hybrid dense (FAISS) + lexical (BM25) retrieval, with optional cross-encoder reranking,
+  once the scope is too large
+- Two orthogonal, fully deterministic classifiers (no extra LLM calls) parameterize every answer:
+  intent (what the question is about — drives retrieval tuning) and response format (how it should
+  look — drives the drafting prompt and a final formatting pass)
+- Per-claim citation extraction, confidence scoring, and hallucination-risk assessment (no LLM call),
+  plus a deterministic pre-reflection shortcut that skips the second LLM call outright when a draft
+  is already unambiguously ungrounded
 - Multi-provider LLM support — Anthropic Claude, OpenAI, or Google Gemini, switchable via one setting
 - FastAPI backend with async/await and WebSocket streaming
 - SQLAlchemy + Alembic migrations for documents, conversations, and semantic conversation memory
 - API-key authentication + rate limiting on sensitive/expensive endpoints
 - Docker Compose deployment (PostgreSQL + Redis + Nginx)
-- 245+ tests, fully isolated from real project data
+- 350+ tests, fully isolated from real project data
 
 ## Quick Start
 
@@ -82,16 +98,20 @@ app/
     small_talk.py              # Greeting/thanks/farewell short-circuit (skips the RAG pipeline)
     agents/                     # Multi-agent pipeline (see docs/ARCHITECTURE.md)
       orchestrator.py             # Deterministic coordinator, all stages
-      retrieval_agent.py            # Wraps HybridRetriever
+      retrieval_agent.py            # Wraps HybridRetriever (RAG search + CAG full-context)
       knowledge_agent.py             # Wraps LLM structured-answer generation
       reflection_agent.py              # Wraps LLM quality-control pass
       memory_agent.py                   # chat_history + opt-in DB persistence
     parser.py                  # PDF/DOCX parsing + structural chunking
     embeddings.py                # Embedding generation + FAISS store + BM25 hybrid
-    intent_classifier.py          # Hybrid rule + semantic classifier
-    retriever.py                   # Adaptive retrieval + reranking + document scoping + memory fallback
-    llm_interface.py                 # Multi-provider LLM client (Gemini/OpenAI/Anthropic)
-    validator.py                      # Citation extraction + confidence scoring
+    intent_classifier.py          # Hybrid rule + semantic classifier (what the question is about)
+    format_classifier.py           # Deterministic response-format classifier (how the answer should look)
+    response_formats.py             # ResponseFormat/ResponseLength enums + per-format prompt templates
+    response_formatter.py            # Deterministic post-generation cleanup (length caps, boilerplate)
+    context_router.py                 # Deterministic RAG-vs-CAG routing (whole-doc context vs ranked retrieval)
+    retriever.py                        # Adaptive retrieval + reranking + document scoping + memory fallback
+    llm_interface.py                      # Multi-provider LLM client (Gemini/OpenAI/Anthropic)
+    validator.py                           # Citation extraction + confidence scoring
 frontend/
   index.html               # Single-page UI shell (sidebar + chat column + settings dialog)
   style.css                # Design system (CSS custom properties, light/dark themes)
@@ -105,6 +125,9 @@ frontend/
     input.js                         # Composer: auto-grow, drag-drop upload, send/stop
     sidebar.js                        # Conversation list: search, switch, rename, delete
     settings.js                        # Settings dialog (theme, developer options)
+    aiHub.js                            # Sidebar AI Hub section (always-visible provider shortcuts)
+    continueResearch.js                  # Per-message "Open in" popup
+    researchProviders.js                  # Config-driven provider definitions shared by both
 alembic/                   # DB migrations (see CLAUDE.md Commands)
 docs/
   ARCHITECTURE.md          # Agent workflow, memory tiers, retrieval flow diagrams
@@ -122,6 +145,16 @@ browser, not per real user account: a `device_id` (`crypto.randomUUID()`, persis
 alongside every question. There's no login yet — see `docs/PHASE_2_ROADMAP.md` for the multi-tenancy
 plan — so anyone who can reach the page can see conversations created from that same browser/device
 combination.
+
+**AI Hub**: a configuration-driven provider list (`researchProviders.js`) drives both the
+always-visible sidebar section (`aiHub.js`) and the per-message "Open in" popup
+(`continueResearch.js`) — adding a new provider (Stack Overflow, MDN, arXiv, ...) is a one-entry
+config change, nothing else. Each provider opens in a new, unrelated tab
+(`target="_blank"`-equivalent + `noopener,noreferrer`); the current question is carried over via a
+verified query parameter where the provider actually supports it (confirmed by hand for each:
+Claude and Perplexity do, ChatGPT and Gemini silently strip it) and falls back to the plain homepage
+otherwise — never a guessed/unsupported URL shape. None of this touches the running conversation;
+it's just a new tab.
 
 ## Authentication
 
@@ -161,6 +194,8 @@ full list with defaults. Notable groups:
 | `HYBRID_DENSE_WEIGHT` | Dense vs. BM25 weight in hybrid retrieval (see `docs/ARCHITECTURE.md`) |
 | `ENABLE_CROSS_ENCODER_RERANK` | Opt-in reranking of the merged candidate pool, off by default |
 | `MEMORY_RELEVANCE_THRESHOLD`, `MEMORY_SUMMARIZE_*` | Conversation-memory tuning (semantic recall across turns once a conversation summarizes) |
+| `ENABLE_CAG`, `CAG_TOKEN_BUDGET` | Whole-document context instead of ranked retrieval when a conversation's document scope fits the budget (word-count proxy, default 6000) |
+| `ENABLE_REFLECTION_SHORTCUT`, `REFLECTION_SHORTCUT_CONFIDENCE_FLOOR` | Skip the second (reflection) LLM call when a draft is already unambiguously ungrounded — saves a full round-trip |
 
 ## API Endpoints
 
@@ -187,7 +222,6 @@ full list with defaults. Notable groups:
 | GET | `/api/conversations/{id}` | ✓ | Full message history for one conversation |
 | PATCH | `/api/conversations/{id}` | ✓ | Rename a conversation |
 | DELETE | `/api/conversations/{id}` | ✓ | Delete a conversation + its semantic memory vectors |
-| POST | `/api/system/reset` | ✓ | Reset bot (clears history + vector store) |
 | GET | `/api/system/config` | – | Internal config summary |
 | GET | `/api/metrics` | ✓ | Metrics |
 
@@ -203,7 +237,7 @@ curl -X POST http://localhost:8000/api/ask \
 ## Running Tests
 
 ```bash
-pytest -v                          # full suite (245+ tests)
+pytest -v                          # full suite (350+ tests)
 pytest tests/test_pipeline.py -v   # single file
 pytest --cov=app                   # with coverage
 ```

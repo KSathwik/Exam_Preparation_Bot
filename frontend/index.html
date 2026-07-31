@@ -46,6 +46,8 @@
 
     <ul class="conversation-list" id="conversationList" aria-label="Conversation history"></ul>
 
+    <div class="sidebar-ai-hub" id="sidebarAiHub" aria-label="AI Hub"></div>
+
     <div class="sidebar-footer">
       <button type="button" class="sidebar-footer-btn" id="settingsBtn">⚙ Settings</button>
       <div class="user-profile-placeholder">
@@ -69,7 +71,7 @@
       <div class="composer-inner">
         <button type="button" class="composer-icon-btn" id="attachBtn" title="Attach a document" aria-label="Attach a document">📎</button>
         <button type="button" class="composer-icon-btn" id="voiceBtn" title="Voice input (coming soon)" aria-label="Voice input, coming soon" disabled>🎤</button>
-        <textarea id="queryInput" rows="1" placeholder="Ask a question about your materials…" aria-label="Ask a question about your materials"></textarea>
+        <textarea id="queryInput" rows="1" maxlength="1000" placeholder="Ask a question about your materials…" aria-label="Ask a question about your materials"></textarea>
         <span class="char-count" id="charCount" hidden></span>
         <button type="submit" class="composer-icon-btn" id="sendBtn" title="Send" aria-label="Send question">➤</button>
       </div>
