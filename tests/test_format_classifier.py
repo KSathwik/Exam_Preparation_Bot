@@ -63,7 +63,7 @@ def test_flashcards_and_mcq_directives(classifier):
 
 
 def test_bare_quiz_word_triggers_mcq(classifier):
-    """"Prepare me a quiz" — a very natural student phrasing — found via live
+    """ "Prepare me a quiz" — a very natural student phrasing — found via live
     testing to not match any prior MCQ trigger ("quiz me"/"generate a quiz"),
     falling through to the HOMEWORK-intent default (EXAM_QUESTIONS, a
     study-guide-style list) instead of an actual quiz. Any mention of the
