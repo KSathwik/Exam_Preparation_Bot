@@ -224,6 +224,30 @@ def test_websocket_rejects_overlong_query(client, mock_bot):
     mock_bot.answer_question.assert_not_called()
 
 
+def test_websocket_rejects_whitespace_only_query(client, mock_bot):
+    """A blank string is caught by ``if not query``, but "   " still has
+    length > 0 — without an explicit .strip() check it would sail through
+    to the pipeline as a real "vague"-intent query instead of being
+    rejected like an empty string is."""
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "   "}')
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    assert "required" in msg["message"].lower()
+    mock_bot.answer_question.assert_not_called()
+
+
+def test_ask_rejects_whitespace_only_query(client, mock_bot):
+    """Same gap as the websocket path, but on the REST QueryRequest schema:
+    Field(min_length=1) alone doesn't reject "   " since it still has
+    length >= 1 — only an explicit .strip() check via a field_validator
+    catches it, same rule BatchQueryRequest already enforces per-item."""
+    resp = client.post("/api/ask", json={"query": "   "})
+    assert resp.status_code == 422
+    mock_bot.answer_question.assert_not_called()
+
+
 def test_search_documents(client, monkeypatch, mock_intent_classifier):
     monkeypatch.setattr(queries_module, "get_vector_store_manager", lambda: MagicMock())
 

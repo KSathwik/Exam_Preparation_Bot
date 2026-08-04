@@ -194,6 +194,56 @@ def test_generate_answer_with_claims_repairs_unescaped_newlines_in_answer(monkey
     assert result["claims"] == [{"claim": "Point one", "chunks": [1]}]
 
 
+def test_generate_answer_with_claims_best_effort_recovers_embedded_quotes_and_js_escapes(monkeypatch):
+    """Found via live smoke testing of the MCQ format: a quoted term embedded
+    *inside* the answer text (e.g. an "ocean world" reference) breaks the
+    whole-object parse, and — because the model also escaped an apostrophe
+    JS/Python-style as \\' (not a valid JSON escape) — even the existing
+    quote-matching regex recovery's own json.loads rejects the captured
+    fragment. Only the structural (", "claims" boundary, not quote-matching)
+    best-effort extraction survives both failures, and must produce clean
+    text with no JSON envelope/escape sequences leaking into the answer."""
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    llm = ClaudeInterface()
+    raw = (
+        '{"answer": "Earth\\\'s Moon formed from Theia. The document calls Earth an '
+        '"ocean world".", "claims": [{"claim": "test claim", "chunks": [1]}]}'
+    )
+    llm._call = MagicMock(return_value=raw)
+
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
+
+    assert result["answer"] == 'Earth\'s Moon formed from Theia. The document calls Earth an "ocean world".'
+    assert result["claims"] == []  # claims are sacrificed on this path — only the answer is recovered
+
+
+def test_generate_answer_with_claims_recovers_partial_answer_from_truncated_response(monkeypatch):
+    """Found via live smoke testing of the MCQ format: a response that hits
+    max_tokens mid-generation never emits a closing '}' at all, so
+    raw.rfind("}") returns -1 — previously that skipped every recovery tier
+    entirely (e > s was never true) and fell straight to showing the raw,
+    unterminated JSON envelope. A readable partial answer sitting right after
+    the opening brace must still be recovered instead."""
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    llm = ClaudeInterface()
+    # No closing brace anywhere — simulates a hard mid-generation cutoff.
+    truncated = (
+        '{"answer":"1. What percentage of Earth\'s crust is covered by ocean?\\n'
+        "A. 50.2%\\nB. 70.8%\\nC. 29.2%\\nD. 90.5%\\n**Answer:** B \\u2014 the excerpt "
+        "states 70.8%.\\n\\n2. What causes tectonic activity?\\nA. Solar wind\\nB. Con"
+    )
+    llm._call = MagicMock(return_value=truncated)
+
+    result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
+
+    assert result["answer"].startswith("1. What percentage of Earth's crust is covered by ocean?")
+    assert "2. What causes tectonic activity?" in result["answer"]
+    assert not result["answer"].startswith("{")  # never leak the raw JSON envelope
+    assert result["claims"] == []
+
+
 def test_generate_answer_with_claims_recovers_answer_when_claims_malformed(monkeypatch):
     """A malformed claims array (e.g. an unescaped quote mark the model
     didn't escape) breaks whole-object json.loads — the answer field must

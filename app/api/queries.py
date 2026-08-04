@@ -192,7 +192,7 @@ async def websocket_query(websocket: WebSocket):
             session_id = message.get("session_id")
             device_id = message.get("device_id")
             document_ids = message.get("document_ids")
-            if not query:
+            if not query or not query.strip():
                 await websocket.send_json({"type": "error", "message": "Query is required"})
                 continue
             if len(query) > 1000:

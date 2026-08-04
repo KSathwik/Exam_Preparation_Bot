@@ -55,6 +55,18 @@ class QueryRequest(BaseModel):
     document_ids: Optional[List[str]] = None
     top_k: Optional[int] = None
 
+    @field_validator("query")
+    @classmethod
+    def _validate_query_not_blank(cls, query: str) -> str:
+        # min_length=1 alone lets a whitespace-only string ("   ") through —
+        # it still has length >= 1. That reaches the pipeline as a real
+        # query, gets classified (as "vague"), and burns a request instead
+        # of failing validation like an empty string does. Same rule
+        # BatchQueryRequest already enforces per-item below.
+        if not query.strip():
+            raise ValueError("Query cannot be blank")
+        return query
+
 
 class SourceCitationOut(BaseModel):
     page_number: int

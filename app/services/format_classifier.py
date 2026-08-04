@@ -30,9 +30,12 @@ FORMAT_KEYWORDS: Dict[ResponseFormat, List[str]] = {
         "mcq",
         "multiple choice",
         "multiple-choice",
-        "quiz me",
-        "generate a quiz",
-        "generate quiz",
+        # Bare "quiz" on purpose, not just "quiz me"/"generate a quiz" — found
+        # via live testing that "prepare me a quiz" (a very natural student
+        # phrasing) didn't match any prior trigger and fell through to the
+        # HOMEWORK-intent default (EXAM_QUESTIONS, a study-guide-style list),
+        # not what "quiz" means to a student. No other format claims this word.
+        "quiz",
     ],
     ResponseFormat.VIVA_QUESTIONS: ["viva question", "viva voce"],
     ResponseFormat.INTERVIEW_QUESTIONS: ["interview question"],
