@@ -318,6 +318,11 @@ def test_get_recent_turns_returns_empty_without_persist_or_session_id(db_session
 
 
 def test_get_recent_turns_handles_db_failure_gracefully():
-    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=MagicMock(side_effect=RuntimeError("db down")))
+    agent = MemoryAgent(
+        [],
+        persist=True,
+        session_id="sess-1",
+        db_session_factory=MagicMock(side_effect=RuntimeError("db down")),
+    )
 
     assert agent.get_recent_turns("sess-1") == []
