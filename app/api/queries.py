@@ -9,12 +9,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
+from app.core.config import redact_query_for_log
 from app.core.dependencies import get_bot, get_intent_classifier, get_vector_store_manager
 from app.core.rate_limit import limit_expensive
 from app.core.security import require_api_key, require_api_key_ws
 from app.models.schemas import BatchQueryRequest, QueryRequest, QueryResponse, SourceCitationOut
 
 router = APIRouter()
+
+# Shown to clients instead of the real exception — raw exception text can
+# leak internal paths, DB connection details, or provider-side error
+# payloads. The real detail always goes to the logs via logger.error/exception
+# right above each use of this constant.
+GENERIC_ERROR_DETAIL = "An internal error occurred. Please try again."
 
 
 def _build_response(request: QueryRequest, answer_with_sources) -> QueryResponse:
@@ -45,7 +52,7 @@ def _build_response(request: QueryRequest, answer_with_sources) -> QueryResponse
 
 async def _answer_query(payload: QueryRequest) -> QueryResponse:
     logger.info(
-        f"[API /ask] query={payload.query!r}  document_id={payload.document_id}  "
+        f"[API /ask] query={redact_query_for_log(payload.query)}  document_id={payload.document_id}  "
         f"session_id={payload.session_id}  device_id={payload.device_id}"
     )
     bot = get_bot()
@@ -64,9 +71,11 @@ async def _answer_query(payload: QueryRequest) -> QueryResponse:
         )
         return response
     except Exception as e:
-        logger.error(f"[API /ask] FAILED: query={payload.query!r}  error={type(e).__name__}: {e}")
+        logger.error(
+            f"[API /ask] FAILED: query={redact_query_for_log(payload.query)}  error={type(e).__name__}: {e}"
+        )
         logger.exception("[API /ask] Full traceback:")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=GENERIC_ERROR_DETAIL)
 
 
 @router.post("/ask", response_model=QueryResponse, dependencies=[Depends(require_api_key)])
@@ -84,7 +93,7 @@ async def query_compat(request: Request, payload: QueryRequest):
 
 @router.get("/intent/{query}", dependencies=[Depends(require_api_key)])
 async def classify_intent(query: str):
-    logger.info(f"[API /intent] query={query!r}")
+    logger.info(f"[API /intent] query={redact_query_for_log(query)}")
     classifier = get_intent_classifier()
     try:
         result = await run_in_threadpool(classifier.classify, query)
@@ -99,8 +108,10 @@ async def classify_intent(query: str):
             "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:
-        logger.error(f"[API /intent] FAILED: query={query!r}  error={type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(
+            f"[API /intent] FAILED: query={redact_query_for_log(query)}  error={type(e).__name__}: {e}"
+        )
+        raise HTTPException(status_code=500, detail=GENERIC_ERROR_DETAIL)
 
 
 @router.post("/batch", dependencies=[Depends(require_api_key)])
@@ -115,37 +126,16 @@ async def batch_queries(request: Request, payload: BatchQueryRequest):
                 {"query": q, "success": True, "answer": a.answer, "confidence": a.overall_confidence}
             )
         except Exception as e:
-            results.append({"query": q, "success": False, "error": str(e)})
+            logger.error(
+                f"[API /batch] item FAILED: query={redact_query_for_log(q)}  error={type(e).__name__}: {e}"
+            )
+            results.append({"query": q, "success": False, "error": GENERIC_ERROR_DETAIL})
     return {
         "total": len(payload.queries),
         "successful": sum(1 for r in results if r.get("success")),
         "failed": sum(1 for r in results if not r.get("success")),
         "results": results,
     }
-
-
-@router.get("/history", dependencies=[Depends(require_api_key)])
-async def get_chat_history():
-    bot = get_bot()
-    return {
-        "messages": [
-            {
-                "role": msg.role,
-                "content": msg.content,
-                "timestamp": msg.timestamp,
-                "intent": msg.intent_type.value if msg.intent_type else None,
-            }
-            for msg in bot.chat_history
-        ],
-        "total": len(bot.chat_history),
-    }
-
-
-@router.delete("/history", dependencies=[Depends(require_api_key)])
-async def clear_chat_history():
-    bot = get_bot()
-    bot.chat_history.clear()
-    return {"status": "success", "message": "Chat history cleared"}
 
 
 @router.post("/search", dependencies=[Depends(require_api_key)])
@@ -294,7 +284,9 @@ async def websocket_query(websocket: WebSocket):
                     }
                 )
             except Exception as e:
-                await websocket.send_json({"type": "error", "message": str(e)})
+                logger.error(f"[API /ws] turn FAILED: error={type(e).__name__}: {e}")
+                logger.exception("[API /ws] Full traceback:")
+                await websocket.send_json({"type": "error", "message": GENERIC_ERROR_DETAIL})
     except Exception:
         pass
     finally:

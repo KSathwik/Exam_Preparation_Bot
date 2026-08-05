@@ -31,10 +31,10 @@
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <nav class="sidebar" id="sidebar">
-    <div class="sidebar-header">
+    <button type="button" class="sidebar-header" id="sidebarHeaderBtn" aria-label="Start a new chat">
       <span class="logo-mark" aria-hidden="true">E</span>
       <span>Exam Prep Bot</span>
-    </div>
+    </button>
 
     <button type="button" class="new-chat-btn" id="newChatBtn">
       <span aria-hidden="true">+</span> New Chat
@@ -59,7 +59,7 @@
   <main class="chat-column" id="chatColumn">
     <div class="mobile-topbar">
       <button type="button" id="sidebarToggleBtn" aria-label="Toggle conversation history">☰</button>
-      <strong>Exam Prep Bot</strong>
+      <button type="button" class="mobile-topbar-title" id="mobileTopbarTitleBtn" aria-label="Start a new chat">Exam Prep Bot</button>
     </div>
 
     <div class="messages-box" id="messagesBox" role="log" aria-live="polite" aria-label="Conversation"></div>

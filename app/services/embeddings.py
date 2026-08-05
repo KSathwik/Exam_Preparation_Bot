@@ -10,7 +10,7 @@ import numpy as np
 from loguru import logger
 from sentence_transformers import SentenceTransformer
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import ChunkMetadata, Document, DocumentChunk, RetrievedChunk
 
@@ -390,7 +390,7 @@ class VectorStoreManager:
         top_k = top_k or settings.retrieval_top_k
         content_types = ["document"] if content_types is None else content_types
         logger.debug(
-            f"[SEARCH] query={query!r}  top_k={top_k}  content_types={content_types}  "
+            f"[SEARCH] query={redact_query_for_log(query)}  top_k={top_k}  content_types={content_types}  "
             f"document_ids={document_ids}  session_ids={session_ids}  index_size={self.vector_store.get_size()}"
         )
         query_embedding = self.embedding_gen.encode_single(query)

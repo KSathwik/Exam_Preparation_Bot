@@ -92,6 +92,14 @@ class ChatSession(Base):
     # chat_messages.id but is enforced at the application layer only.
     last_summarized_message_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
+    # Bumped only by real conversation activity (a new turn — see
+    # MemoryAgent._persist_turn), never by metadata edits like a rename.
+    # Deliberately separate from updated_at: updated_at's SQLAlchemy
+    # `onupdate` fires on *any* UPDATE to this row regardless of which column
+    # changed (including a title-only rename), so reusing it for "most
+    # recently active" sorting meant renaming a conversation silently jumped
+    # it to the top of the sidebar — see list_conversations' order_by.
+    last_activity_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     messages = relationship("ChatMessageRecord", back_populates="session", cascade="all, delete-orphan")

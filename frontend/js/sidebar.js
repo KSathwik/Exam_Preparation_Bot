@@ -203,9 +203,11 @@ async function switchConversation(sessionId) {
   showHistorySkeleton();
   try {
     const data = await getConversation(sessionId);
+    if (state.sessionId !== sessionId) return; // a newer switch/new-chat landed first — discard this stale response
     renderHistory(data.messages || []);
     if (!data.messages || data.messages.length === 0) showEmptyStateIfNeeded();
   } catch {
+    if (state.sessionId !== sessionId) return;
     clearMessages();
     showEmptyStateIfNeeded();
   }
@@ -234,6 +236,8 @@ export async function initSidebar() {
   listEl = document.getElementById("conversationList");
   searchInput = document.getElementById("conversationSearch");
   document.getElementById("newChatBtn").addEventListener("click", startNewChat);
+  document.getElementById("sidebarHeaderBtn").addEventListener("click", startNewChat);
+  document.getElementById("mobileTopbarTitleBtn").addEventListener("click", startNewChat);
   searchInput.addEventListener("input", applySearchFilter);
 
   document.getElementById("sidebarToggleBtn").addEventListener("click", () => {

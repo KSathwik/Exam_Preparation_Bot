@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 
 from loguru import logger
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .embeddings import VectorStoreManager
 from .models import ChunkMetadata, QueryType, RetrievedChunk
@@ -77,7 +77,7 @@ class AdaptiveRetriever:
         best = chunks[0].relevance_score if chunks else 0.0
         in_scope = bool(chunks) and best >= self.relevance_threshold
         logger.info(
-            f"Retrieval: query={query!r}  best_score={best:.4f}  "
+            f"Retrieval: query={redact_query_for_log(query)}  best_score={best:.4f}  "
             f"threshold={self.relevance_threshold}  in_scope={in_scope}  "
             f"n_chunks={len(chunks)}"
         )
@@ -125,7 +125,7 @@ class AdaptiveRetriever:
 
         raw_results = self.vector_store.search(query, top_k=top_k * 2)
         if not raw_results:
-            logger.debug(f"No raw results for query: {query!r}")
+            logger.debug(f"No raw results for query: {redact_query_for_log(query)}")
             return self._try_memory_fallback(query, top_k, session_id)
 
         chunks, in_scope = self._score_results(query, raw_results, top_k)
@@ -174,7 +174,7 @@ class AdaptiveRetriever:
         if in_scope:
             logger.info(
                 f"[RETRIEVAL] Document retrieval missed — semantic memory hit: "
-                f"query={query!r}  best_score={best:.4f}"
+                f"query={redact_query_for_log(query)}  best_score={best:.4f}"
             )
             return chunks, True
         return [], False

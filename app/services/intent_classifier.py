@@ -7,7 +7,7 @@ from loguru import logger
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import IntentClassificationResult, QueryType
 
@@ -147,7 +147,7 @@ class IntentClassifier:
             self.template_embeddings[intent] = np.mean(embeddings, axis=0)
 
     def classify(self, query: str) -> IntentClassificationResult:
-        logger.debug(f"[INTENT] Classifying: {query!r}  threshold={self.threshold}")
+        logger.debug(f"[INTENT] Classifying: {redact_query_for_log(query)}  threshold={self.threshold}")
         rule_result = self._classify_by_rules(query)
         if rule_result and rule_result["confidence"] > self.threshold:
             logger.info(

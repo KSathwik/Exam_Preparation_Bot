@@ -55,6 +55,9 @@ def test_record_turn_with_persist_creates_session_and_messages(db_session_factor
     session_row = db.get(ChatSession, "sess-1")
     assert session_row is not None
     assert session_row.turn_count == 1
+    # A real turn is exactly the kind of "activity" that should move this
+    # conversation to the top of the sidebar (see ChatSession.last_activity_at).
+    assert session_row.last_activity_at is not None
 
     messages = db.query(ChatMessageRecord).filter_by(session_id="sess-1").order_by(ChatMessageRecord.id).all()
     assert len(messages) == 2

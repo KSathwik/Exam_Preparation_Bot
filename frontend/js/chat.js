@@ -349,19 +349,28 @@ async function showNoMatchSuggestions(suggestionsEl) {
     return;
   }
 
-  const chips = [...byName.keys()]
-    .map((name) => `<button type="button" class="suggestion-chip" data-name="${escapeText(name)}">${escapeText(name)}</button>`)
-    .join("");
-  suggestionsEl.innerHTML = `<p>Try asking about one of your loaded documents:</p><div class="suggestion-chips">${chips}</div>`;
-  suggestionsEl.querySelectorAll(".suggestion-chip").forEach((chip) => {
+  suggestionsEl.innerHTML = '<p>Try asking about one of your loaded documents:</p><div class="suggestion-chips"></div>';
+  const chipsEl = suggestionsEl.querySelector(".suggestion-chips");
+  // Built via createElement + dataset/textContent (real DOM property
+  // assignment) rather than string-interpolated into innerHTML — a filename
+  // is fully attacker-controlled at upload time, and escaping it into an
+  // HTML attribute string is one missed character away from an XSS
+  // breakout. This is immune to that class of bug structurally.
+  for (const name of byName.keys()) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.dataset.name = name;
+    chip.textContent = name;
     chip.addEventListener("click", () => {
-      setDocumentIds(byName.get(chip.dataset.name) || []);
+      setDocumentIds(byName.get(name) || []);
       const input = document.getElementById("queryInput");
-      input.value = `What does "${chip.dataset.name}" cover?`;
+      input.value = `What does "${name}" cover?`;
       input.focus();
       input.dispatchEvent(new Event("input"));
     });
-  });
+    chipsEl.appendChild(chip);
+  }
 }
 
 /* ── Streaming ─────────────────────────────────────────────────────── */

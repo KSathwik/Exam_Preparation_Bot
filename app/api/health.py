@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import settings
-from app.core.security import require_api_key
+from app.core.security import require_admin_key
 
 router = APIRouter()
 
@@ -61,12 +61,14 @@ async def get_public_config():
     }
 
 
-@router.get("/logs/tail", response_class=PlainTextResponse, dependencies=[Depends(require_api_key)])
+@router.get("/logs/tail", response_class=PlainTextResponse, dependencies=[Depends(require_admin_key)])
 async def tail_logs(lines: int = 100):
     """Return the last N lines of the log file for quick debugging.
 
-    Requires an API key — the log file can contain internal paths, stack
-    traces, and other operational detail that shouldn't be publicly readable.
+    Requires the operator-only ADMIN_API_KEY, not the regular API key — the
+    log file can contain other users' (truncated) query text and other
+    operational detail that shouldn't be reachable with the same key the
+    frontend embeds in every page load.
     """
     log_path = Path(settings.log_file)
     if not log_path.exists():

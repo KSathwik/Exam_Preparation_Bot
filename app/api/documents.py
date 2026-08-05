@@ -151,7 +151,7 @@ async def upload_document(
         save_path.unlink(missing_ok=True)
         logger.error(f"[UPLOAD] FAILED: {file.filename}  error={type(e).__name__}: {e}")
         logger.exception("[UPLOAD] Full traceback:")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
 
 
 @router.get("/list")

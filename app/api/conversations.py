@@ -8,8 +8,6 @@ known, same pattern ``app/api/documents.py``'s delete-by-id already uses —
 there is no per-user ownership model in this app today.
 """
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
@@ -51,7 +49,10 @@ async def list_conversations(
     sessions = (
         db.query(ChatSession)
         .filter(ChatSession.device_id == device_id)
-        .order_by(ChatSession.updated_at.desc())
+        # Most-recently-active first, like ChatGPT/Claude — last_activity_at
+        # only moves on a real turn (see ChatSession's comment), never on a
+        # rename, so renaming a conversation never reorders the sidebar.
+        .order_by(ChatSession.last_activity_at.desc())
         .all()
     )
     return ConversationListResponse(
@@ -97,8 +98,11 @@ async def rename_conversation(
     if session_row is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Deliberately does not touch last_activity_at — a rename is metadata,
+    # not activity, and must never reorder the sidebar (see
+    # ChatSession.last_activity_at / list_conversations). updated_at still
+    # advances automatically via the column's own onupdate.
     session_row.title = payload.title
-    session_row.updated_at = datetime.now()
     db.commit()
     db.refresh(session_row)
     return ConversationRenameResponse(success=True, conversation=_to_summary(session_row))

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.api.queries as queries_module
-from app.services.models import AnswerWithSources, ChatMessage, IntentClassificationResult, QueryType
+from app.services.models import AnswerWithSources, IntentClassificationResult, QueryType
 from tests.conftest import TEST_API_KEY
 
 
@@ -127,19 +127,6 @@ def test_batch_partial_failure_reported(client, mock_bot):
     data = resp.json()
     assert data["successful"] == 1
     assert data["failed"] == 1
-
-
-def test_history_roundtrip(client, mock_bot):
-    mock_bot.chat_history = [
-        ChatMessage(role="user", content="hi", timestamp="2024-01-01", intent_type=QueryType.VAGUE)
-    ]
-    resp = client.get("/api/history")
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 1
-
-    resp = client.delete("/api/history")
-    assert resp.status_code == 200
-    assert mock_bot.chat_history == []
 
 
 def test_websocket_streams_only_the_final_answer_and_completes(client, mock_bot):

@@ -156,6 +156,33 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_file: str = "./logs/app.log"
+    # Rotation/retention/compression were previously hardcoded in main.py —
+    # moved here so an operator can tune them via .env like every other
+    # setting, without a code change + redeploy.
+    log_rotation: str = "10 MB"
+    log_retention: str = "7 days"
+    log_compression: str = "zip"
+    # Separate error-only sink so ops can tail/alert on failures without
+    # wading through DEBUG/INFO noise from the combined app log.
+    error_log_file: str = "./logs/error.log"
+    # Plain text is human-readable but not natively parseable by a log
+    # aggregation pipeline (Loki/ELK/CloudWatch/Datadog); set true to emit
+    # newline-delimited JSON via loguru's serialize=True instead.
+    log_json: bool = False
+    # Raw user query text was being logged verbatim at INFO across the
+    # pipeline, then made retrievable by any holder of the shared,
+    # frontend-exposed API key via GET /api/logs/tail — a cross-user
+    # disclosure of question content. On by default; only disable in a
+    # trusted single-operator environment where full-text debug logs are
+    # wanted.
+    log_redact_user_content: bool = True
+
+    # A second, operator-only credential for endpoints that must not be
+    # reachable with the same key the frontend embeds in every page load
+    # (expose_api_key_to_frontend) — currently GET /api/logs/tail and
+    # GET /api/metrics. None disables those routes entirely rather than
+    # falling back to the public key.
+    admin_api_key: Optional[str] = None
 
     # Performance
     enable_async: bool = True
@@ -200,3 +227,19 @@ try:
 except Exception as e:
     logger.error(f"Configuration error: {e}")
     raise
+
+
+def redact_query_for_log(query: Optional[str], max_len: int = 80) -> str:
+    """Format a user query for a log line — truncated to `max_len` chars with
+    the real length appended, not the full text. Raw query text logged
+    verbatim was retrievable by any holder of the shared, frontend-exposed
+    API key via GET /api/logs/tail — a cross-user disclosure of question
+    content. Controlled by settings.log_redact_user_content (on by default);
+    disable only in a trusted single-operator environment that wants
+    full-text debug logs."""
+    text = query or ""
+    if not settings.log_redact_user_content:
+        return repr(text)
+    shown = text[:max_len]
+    suffix = "..." if len(text) > max_len else ""
+    return f"{shown!r}{suffix} (len={len(text)})"

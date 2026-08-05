@@ -174,6 +174,10 @@ class MemoryAgent:
             )
             db.add(assistant_msg)
             session_row.turn_count += 1
+            # The only place last_activity_at should move — a real turn, not
+            # a title edit (see ChatSession.last_activity_at's comment and
+            # list_conversations' order_by).
+            session_row.last_activity_at = datetime.now()
             db.flush()
 
             self._maybe_summarize(db, session_row, assistant_msg, session_id)

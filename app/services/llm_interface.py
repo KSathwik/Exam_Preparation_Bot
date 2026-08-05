@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from loguru import logger
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import ChatMessage, QueryType, RetrievedChunk
 from .response_formats import LENGTH_MAX_TOKENS, RESPONSE_FORMAT_TEMPLATES, ResponseFormat
@@ -405,7 +405,7 @@ class _BaseLLM(ABC):
         history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         logger.info(
-            f"LLM generate_structured_answer: query={query!r}  intent={intent.value}  "
+            f"LLM generate_structured_answer: query={redact_query_for_log(query)}  intent={intent.value}  "
             f"response_format={response_format.value}  chunks={len(retrieved_chunks)}"
         )
         drafted = self.generate_answer_with_claims(
