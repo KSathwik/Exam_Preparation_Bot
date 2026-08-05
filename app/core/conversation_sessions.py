@@ -27,5 +27,5 @@ def get_or_create_chat_session(
         db.add(session_row)
         db.flush()
     elif device_id and not session_row.device_id:
-        session_row.device_id = device_id  # opportunistic backfill for older/partial rows
+        session_row.device_id = device_id  # type: ignore[assignment] # opportunistic backfill for older/partial rows
     return session_row

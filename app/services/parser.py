@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 
 import pdfplumber
 from docx import Document as DocxDocument
@@ -31,7 +31,7 @@ class _Block:
 class DocumentParser:
     """Parse documents and extract text with metadata."""
 
-    def __init__(self, max_chunk_size: int = None, chunk_overlap: int = None):
+    def __init__(self, max_chunk_size: Optional[int] = None, chunk_overlap: Optional[int] = None):
         self.max_chunk_size = max_chunk_size or settings.max_chunk_size
         self.chunk_overlap = chunk_overlap or settings.chunk_overlap
         self.min_chunk_size = settings.min_chunk_size
@@ -200,7 +200,7 @@ def _docx_heading_level(style_name: Optional[str]) -> Optional[int]:
     return None
 
 
-def _docx_to_blocks(doc: DocxDocument) -> List[_Block]:
+def _docx_to_blocks(doc: Any) -> List[_Block]:
     """Split DOCX paragraphs into heading-scoped blocks using
     ``paragraph.style.name`` — an exact signal, no heuristic needed."""
     blocks: List[_Block] = []

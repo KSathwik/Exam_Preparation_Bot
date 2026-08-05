@@ -47,7 +47,7 @@ _file_sink_kwargs = {
     "serialize": settings.log_json,
 }
 logger.add(
-    settings.log_file,
+    settings.log_file,  # type: ignore[call-overload]
     level="DEBUG",
     format=_TEXT_FORMAT if not settings.log_json else "{message}",
     **_file_sink_kwargs,
@@ -55,7 +55,7 @@ logger.add(
 # Separate error-only sink — lets ops tail/alert on failures without wading
 # through DEBUG/INFO noise from the combined app log.
 logger.add(
-    settings.error_log_file,
+    settings.error_log_file,  # type: ignore[call-overload]
     level="ERROR",
     format=_TEXT_FORMAT if not settings.log_json else "{message}",
     **_file_sink_kwargs,
@@ -115,7 +115,7 @@ app.add_middleware(
 
 # Rate limiting (per client IP) on expensive/LLM-calling endpoints
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
 

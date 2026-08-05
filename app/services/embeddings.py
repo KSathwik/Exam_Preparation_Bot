@@ -53,9 +53,9 @@ class EmbeddingGenerator:
         else:
             self.embedding_dim = self.model.get_sentence_embedding_dimension()
 
-    def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:
+    def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:  # type: ignore[assignment]
         batch_size = batch_size or settings.batch_size
-        return self.model.encode(
+        return self.model.encode(  # type: ignore[return-value]
             texts,
             batch_size=batch_size,
             show_progress_bar=False,
@@ -63,13 +63,13 @@ class EmbeddingGenerator:
         )
 
     def encode_single(self, text: str) -> np.ndarray:
-        return self.model.encode(text, normalize_embeddings=True)
+        return self.model.encode(text, normalize_embeddings=True)  # type: ignore[return-value]
 
 
 class FAISSVectorStore:
     """FAISS-based vector store for efficient similarity search."""
 
-    def __init__(self, dimension: int = None, index_path: str = None):
+    def __init__(self, dimension: int = None, index_path: str = None):  # type: ignore[assignment]
         self.dimension = dimension or settings.vector_dimension
         self.index_path = index_path or settings.faiss_index_path
         self.index = None
@@ -117,7 +117,7 @@ class FAISSVectorStore:
             self.chunk_metadata = chunk_metadata
             self.embeddings = embeddings
             logger.info(
-                f"[FAISS] Loaded index: vectors={self.index.ntotal}  metadata={len(self.chunk_metadata)}  path={self.index_path}"
+                f"[FAISS] Loaded index: vectors={self.index.ntotal}  metadata={len(self.chunk_metadata)}  path={self.index_path}"  # type: ignore[attr-defined]
             )
             return True
         except Exception as e:
@@ -162,7 +162,7 @@ class FAISSVectorStore:
         if self.index is None:
             self.create_index()
         embeddings = embeddings.astype(np.float32)
-        self.index.add(embeddings)
+        self.index.add(embeddings)  # type: ignore[attr-defined]
         self.chunk_metadata.extend(metadata_list)
         if self.embeddings is None:
             self.embeddings = embeddings
@@ -371,7 +371,7 @@ class VectorStoreManager:
     def search(
         self,
         query: str,
-        top_k: int = None,
+        top_k: int = None,  # type: ignore[assignment]
         content_types: Optional[List[str]] = None,
         document_ids: Optional[List[str]] = None,
         session_ids: Optional[List[str]] = None,

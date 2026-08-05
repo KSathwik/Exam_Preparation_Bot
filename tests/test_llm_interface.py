@@ -80,11 +80,11 @@ def test_anthropic_call_uses_client(monkeypatch):
     fake_response.content = [MagicMock(type="text", text="42")]
     fake_response.usage.input_tokens = 10
     fake_response.usage.output_tokens = 3
-    llm._client.messages.create = MagicMock(return_value=fake_response)
+    llm._client.messages.create = MagicMock(return_value=fake_response)  # type: ignore[attr-defined]
 
     result = llm._call("system prompt", "user message")
     assert result == "42"
-    llm._client.messages.create.assert_called_once()
+    llm._client.messages.create.assert_called_once()  # type: ignore[attr-defined]
 
 
 def test_anthropic_call_skips_thinking_blocks(monkeypatch):
@@ -102,7 +102,7 @@ def test_anthropic_call_skips_thinking_blocks(monkeypatch):
     fake_response.content = [thinking_block, MagicMock(type="text", text="the real answer")]
     fake_response.usage.input_tokens = 10
     fake_response.usage.output_tokens = 3
-    llm._client.messages.create = MagicMock(return_value=fake_response)
+    llm._client.messages.create = MagicMock(return_value=fake_response)  # type: ignore[attr-defined]
 
     result = llm._call("system prompt", "user message")
     assert result == "the real answer"
@@ -116,7 +116,7 @@ def test_openai_call_uses_client(monkeypatch):
     fake_response = MagicMock()
     fake_response.choices = [MagicMock(message=MagicMock(content="answer text"))]
     fake_response.usage = MagicMock(prompt_tokens=5, completion_tokens=2)
-    llm._client.chat.completions.create = MagicMock(return_value=fake_response)
+    llm._client.chat.completions.create = MagicMock(return_value=fake_response)  # type: ignore[attr-defined]
 
     result = llm._call("system prompt", "user message")
     assert result == "answer text"
@@ -129,18 +129,18 @@ def test_gemini_call_uses_client(monkeypatch):
 
     fake_response = MagicMock()
     fake_response.text = "gemini answer"
-    llm._client.models.generate_content = MagicMock(return_value=fake_response)
+    llm._client.models.generate_content = MagicMock(return_value=fake_response)  # type: ignore[attr-defined]
 
     result = llm._call("system prompt", "user message")
     assert result == "gemini answer"
-    llm._client.models.generate_content.assert_called_once()
+    llm._client.models.generate_content.assert_called_once()  # type: ignore[attr-defined]
 
 
 def test_generate_answer_with_claims_parses_json_object(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(
+    llm._call = MagicMock(  # type: ignore[method-assign]
         return_value=(
             "Here you go: "
             '{"answer": "Mitochondria produce ATP.", '
@@ -162,7 +162,7 @@ def test_generate_answer_with_claims_tolerates_plain_string_claims(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(return_value='{"answer": "The answer.", "claims": ["Claim one", "Claim two"]}')
+    llm._call = MagicMock(return_value='{"answer": "The answer.", "claims": ["Claim one", "Claim two"]}')  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -186,7 +186,7 @@ def test_generate_answer_with_claims_repairs_unescaped_newlines_in_answer(monkey
         '{"answer": "## Heading One\n- Point one\n- Point two\n\n## Heading Two\nMore text.", '
         '"claims": [{"claim": "Point one", "chunks": [1]}]}'
     )
-    llm._call = MagicMock(return_value=raw_with_literal_newlines)
+    llm._call = MagicMock(return_value=raw_with_literal_newlines)  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -210,7 +210,7 @@ def test_generate_answer_with_claims_best_effort_recovers_embedded_quotes_and_js
         '{"answer": "Earth\\\'s Moon formed from Theia. The document calls Earth an '
         '"ocean world".", "claims": [{"claim": "test claim", "chunks": [1]}]}'
     )
-    llm._call = MagicMock(return_value=raw)
+    llm._call = MagicMock(return_value=raw)  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -234,7 +234,7 @@ def test_generate_answer_with_claims_recovers_partial_answer_from_truncated_resp
         "A. 50.2%\\nB. 70.8%\\nC. 29.2%\\nD. 90.5%\\n**Answer:** B \\u2014 the excerpt "
         "states 70.8%.\\n\\n2. What causes tectonic activity?\\nA. Solar wind\\nB. Con"
     )
-    llm._call = MagicMock(return_value=truncated)
+    llm._call = MagicMock(return_value=truncated)  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -256,7 +256,7 @@ def test_generate_answer_with_claims_recovers_answer_when_claims_malformed(monke
         '{"answer": "Earth has land and ocean.", '
         '"claims": [{"claim": "Earth is an "ocean world"", "chunks": [1]}]}'
     )
-    llm._call = MagicMock(return_value=malformed)
+    llm._call = MagicMock(return_value=malformed)  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -269,7 +269,7 @@ def test_generate_answer_with_claims_falls_back_to_raw_text(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(return_value="Just a plain prose answer, no JSON at all.")
+    llm._call = MagicMock(return_value="Just a plain prose answer, no JSON at all.")  # type: ignore[method-assign]
 
     result = llm.generate_answer_with_claims("q", [_chunk()], QueryType.DEFINITION)
 
@@ -280,7 +280,7 @@ def test_generate_structured_answer_maps_format_type(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm.generate_answer_with_claims = MagicMock(
+    llm.generate_answer_with_claims = MagicMock(  # type: ignore[method-assign]
         return_value={
             "answer": "The mitochondria is the powerhouse of the cell.",
             "claims": [{"claim": "The mitochondria is the powerhouse of the cell.", "chunks": [1]}],
@@ -299,7 +299,7 @@ def test_reflect_on_answer_parses_json(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(
+    llm._call = MagicMock(  # type: ignore[method-assign]
         return_value=(
             "Here is my review: "
             '{"revised_answer": "Better answer.", "materially_changed": true, '
@@ -328,7 +328,7 @@ def test_reflect_on_answer_falls_back_on_malformed_response(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(return_value="not json at all")
+    llm._call = MagicMock(return_value="not json at all")  # type: ignore[method-assign]
 
     result = llm.reflect_on_answer(
         query="What is a mitochondria?",
@@ -350,7 +350,7 @@ def test_reflect_on_answer_falls_back_on_exception(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(side_effect=RuntimeError("provider down"))
+    llm._call = MagicMock(side_effect=RuntimeError("provider down"))  # type: ignore[method-assign]
 
     result = llm.reflect_on_answer(
         query="What is a mitochondria?",
@@ -372,7 +372,7 @@ def test_summarize_conversation_returns_text(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(return_value="  Discussed mitochondria structure and function.  ")
+    llm._call = MagicMock(return_value="  Discussed mitochondria structure and function.  ")  # type: ignore[method-assign]
 
     turns = [
         ChatMessage(role="user", content="What is a mitochondria?", timestamp="2024-01-01T00:00:00"),
@@ -388,7 +388,7 @@ def test_summarize_conversation_returns_empty_on_failure(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "anthropic")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     llm = ClaudeInterface()
-    llm._call = MagicMock(side_effect=RuntimeError("provider down"))
+    llm._call = MagicMock(side_effect=RuntimeError("provider down"))  # type: ignore[method-assign]
 
     turns = [ChatMessage(role="user", content="hi", timestamp="2024-01-01T00:00:00")]
     assert llm.summarize_conversation(turns) == ""

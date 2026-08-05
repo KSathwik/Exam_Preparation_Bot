@@ -39,6 +39,7 @@ def test_no_session_id_returns_client_ids_unchanged(db_session_factory):
 
 def test_session_id_with_no_client_ids_returns_full_conversation_scope(db_session_factory):
     result = resolve_document_scope(db_session_factory, "sess-1", None)
+    assert result is not None
     assert set(result) == {"doc-1", "doc-2"}
 
 
@@ -57,9 +58,11 @@ def test_client_ids_cannot_expand_beyond_the_conversations_documents(db_session_
     reload that resurrected an old client-side list) is silently dropped —
     it can never widen the scope beyond what this conversation actually owns."""
     result = resolve_document_scope(db_session_factory, "sess-1", ["doc-3"])
+    assert result is not None
     assert set(result) == {"doc-1", "doc-2"}
 
 
 def test_client_ids_entirely_foreign_falls_back_to_full_conversation_scope(db_session_factory):
     result = resolve_document_scope(db_session_factory, "sess-1", ["doc-3", "doc-nonexistent"])
+    assert result is not None
     assert set(result) == {"doc-1", "doc-2"}

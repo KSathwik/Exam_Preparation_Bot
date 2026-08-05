@@ -68,7 +68,7 @@ class ExamPrepBot:
     # ------------------------------------------------------------------
     # Document upload
     # ------------------------------------------------------------------
-    def upload_document(self, file_path: str, file_type: str = None) -> dict:
+    def upload_document(self, file_path: str, file_type: Optional[str] = None) -> dict:
         logger.info(f"Uploading document: {file_path}")
         start = time.time()
         try:

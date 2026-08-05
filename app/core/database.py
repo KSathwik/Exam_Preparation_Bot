@@ -4,6 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import create_engine
+from typing import Iterator
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -28,7 +29,7 @@ def init_db() -> None:
     logger.info("Database initialized successfully")
 
 
-def get_db() -> Session:
+def get_db() -> Iterator[Session]:
     """FastAPI dependency that yields a DB session."""
     db = SessionLocal()
     try:

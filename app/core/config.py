@@ -211,7 +211,9 @@ class Settings(BaseSettings):
     # Rate limiting (requests per minute per client IP) on LLM-calling endpoints
     rate_limit_per_minute: int = 30
 
-    model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+    # pydantic's ConfigDict typing can be stricter than the runtime fields
+    # we pass here; silence mypy for the assignment and keep runtime behavior.
+    model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")  # type: ignore
 
 
 def _create_directories(s: Settings) -> None:
