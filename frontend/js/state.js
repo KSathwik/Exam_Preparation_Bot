@@ -4,6 +4,9 @@
 
 const DEVICE_ID_KEY = "examPrepDeviceId";
 const SESSION_ID_KEY = "examPrepSessionId";
+const PRESET_KEY = "examPrepDomainPreset";
+const TOP_K_KEY = "examPrepTopK";
+const TEMP_KEY = "examPrepTemperature";
 
 function readDeviceId() {
   try {
@@ -18,26 +21,50 @@ function readDeviceId() {
   }
 }
 
+function readStorageValue(key, fallback) {
+  try {
+    const val = localStorage.getItem(key);
+    return val !== null ? val : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export const state = {
   deviceId: readDeviceId(),
   sessionId: null,
   ws: null,
   streaming: false,
   conversations: [],
-  // Optional narrowing hint only — the server resolves the conversation's
-  // real document set from the DB (documents.session_id, set at upload
-  // time) as the authoritative scope, so losing this on reload/tab-switch
-  // is safe. Populated on upload and by suggestion-chip clicks to narrow a
-  // question to one specific document among possibly several uploaded in
-  // this same conversation; never used to *expand* scope beyond it.
   documentIds: [],
-  // Set by clicking Edit on a past user message; read (and cleared) by the
-  // next sendQuery() call so it regenerates that message+reply pair in
-  // place instead of appending a new one. Never persisted — reset if the
-  // composer is cleared without sending (see input.js) or the row is no
-  // longer in the DOM (conversation switched/cleared).
   editingUserRow: null,
+  domainPreset: readStorageValue(PRESET_KEY, "general"),
+  topK: parseInt(readStorageValue(TOP_K_KEY, "4"), 10) || 4,
+  temperature: parseFloat(readStorageValue(TEMP_KEY, "0.3")) || 0.3,
 };
+
+export function setDomainPreset(preset) {
+  state.domainPreset = preset;
+  try {
+    localStorage.setItem(PRESET_KEY, preset);
+  } catch {}
+}
+
+export function setTopK(val) {
+  const num = parseInt(val, 10) || 4;
+  state.topK = num;
+  try {
+    localStorage.setItem(TOP_K_KEY, String(num));
+  } catch {}
+}
+
+export function setTemperature(val) {
+  const num = parseFloat(val) || 0.3;
+  state.temperature = num;
+  try {
+    localStorage.setItem(TEMP_KEY, String(num));
+  } catch {}
+}
 
 export function addDocumentId(id) {
   if (id && !state.documentIds.includes(id)) state.documentIds.push(id);

@@ -8,8 +8,6 @@ known, same pattern ``app/api/documents.py``'s delete-by-id already uses —
 there is no per-user ownership model in this app today.
 """
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
@@ -35,11 +33,11 @@ router = APIRouter(dependencies=[Depends(require_api_key)])
 
 def _to_summary(session_row: ChatSession) -> ConversationSummaryOut:
     return ConversationSummaryOut(
-        session_id=session_row.id,
-        title=session_row.title,
-        created_at=session_row.created_at,
-        updated_at=session_row.updated_at,
-        message_count=session_row.turn_count * 2,
+        session_id=session_row.id,  # type: ignore[arg-type]
+        title=session_row.title,  # type: ignore[arg-type]
+        created_at=session_row.created_at,  # type: ignore[arg-type]
+        updated_at=session_row.updated_at,  # type: ignore[arg-type]
+        message_count=session_row.turn_count * 2,  # type: ignore[arg-type]
     )
 
 
@@ -51,7 +49,10 @@ async def list_conversations(
     sessions = (
         db.query(ChatSession)
         .filter(ChatSession.device_id == device_id)
-        .order_by(ChatSession.updated_at.desc())
+        # Most-recently-active first, like ChatGPT/Claude — last_activity_at
+        # only moves on a real turn (see ChatSession's comment), never on a
+        # rename, so renaming a conversation never reorders the sidebar.
+        .order_by(ChatSession.last_activity_at.desc())
         .all()
     )
     return ConversationListResponse(
@@ -72,17 +73,17 @@ async def get_conversation(session_id: str, db: Session = Depends(get_db)):
     )
     return ConversationDetailResponse(
         success=True,
-        session_id=session_row.id,
-        title=session_row.title,
-        created_at=session_row.created_at,
-        updated_at=session_row.updated_at,
+        session_id=session_row.id,  # type: ignore[arg-type]
+        title=session_row.title,  # type: ignore[arg-type]
+        created_at=session_row.created_at,  # type: ignore[arg-type]
+        updated_at=session_row.updated_at,  # type: ignore[arg-type]
         messages=[
             ChatMessageOut(
-                role=m.role,
-                content=m.content,
+                role=m.role,  # type: ignore[arg-type]
+                content=m.content,  # type: ignore[arg-type]
                 timestamp=m.created_at.isoformat() if m.created_at else "",
-                intent=m.intent,
-                format_type=m.format_type,
+                intent=m.intent,  # type: ignore[arg-type]
+                format_type=m.format_type,  # type: ignore[arg-type]
             )
             for m in messages
         ],
@@ -97,8 +98,11 @@ async def rename_conversation(
     if session_row is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    session_row.title = payload.title
-    session_row.updated_at = datetime.now()
+    # Deliberately does not touch last_activity_at — a rename is metadata,
+    # not activity, and must never reorder the sidebar (see
+    # ChatSession.last_activity_at / list_conversations). updated_at still
+    # advances automatically via the column's own onupdate.
+    session_row.title = payload.title  # type: ignore[assignment]
     db.commit()
     db.refresh(session_row)
     return ConversationRenameResponse(success=True, conversation=_to_summary(session_row))
@@ -121,7 +125,7 @@ async def delete_conversation(session_id: str, db: Session = Depends(get_db)):
     if embedded_memories or documents:
         bot = get_bot()
         for memory_row in embedded_memories:
-            await run_in_threadpool(bot.vector_store_manager.remove_document, memory_row.id)
+            await run_in_threadpool(bot.vector_store_manager.remove_document, memory_row.id)  # type: ignore[arg-type]
         # Each chat is its own isolated notebook — deleting it deletes the
         # document(s) that belonged only to it (vectors, uploaded file, and
         # DB row), same cleanup as DELETE /documents/{document_id}.

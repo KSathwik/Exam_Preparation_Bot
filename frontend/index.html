@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Exam Prep Bot</title>
+<title>AI Knowledge Assistant</title>
 
 <script>
   // Blocking (runs before CSS paints) so there's no flash of the wrong theme.
@@ -31,10 +31,10 @@
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <nav class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <span class="logo-mark" aria-hidden="true">E</span>
-      <span>Exam Prep Bot</span>
-    </div>
+    <button type="button" class="sidebar-header" id="sidebarHeaderBtn" aria-label="Start a new chat">
+      <span class="logo-mark" aria-hidden="true">K</span>
+      <span>AI Knowledge Assistant</span>
+    </button>
 
     <button type="button" class="new-chat-btn" id="newChatBtn">
       <span aria-hidden="true">+</span> New Chat
@@ -59,12 +59,21 @@
   <main class="chat-column" id="chatColumn">
     <div class="mobile-topbar">
       <button type="button" id="sidebarToggleBtn" aria-label="Toggle conversation history">☰</button>
-      <strong>Exam Prep Bot</strong>
+      <button type="button" class="mobile-topbar-title" id="mobileTopbarTitleBtn" aria-label="Start a new chat">AI Knowledge Assistant</button>
     </div>
 
     <div class="messages-box" id="messagesBox" role="log" aria-live="polite" aria-label="Conversation"></div>
 
     <button type="button" class="jump-to-latest" id="jumpToLatestBtn" hidden>↓ Jump to latest</button>
+
+    <div class="preset-selector-bar" id="presetSelectorBar" role="radiogroup" aria-label="Domain Preset">
+      <span class="preset-label">Domain:</span>
+      <button type="button" class="preset-pill active" data-preset="general" title="General knowledge QA">🌐 General</button>
+      <button type="button" class="preset-pill" data-preset="exam" title="Study materials & exam prep">📚 Exam Prep</button>
+      <button type="button" class="preset-pill" data-preset="tech" title="Code, architecture & technical docs">💻 Tech Docs</button>
+      <button type="button" class="preset-pill" data-preset="legal" title="Contracts, legal & policy documents">⚖️ Legal</button>
+      <button type="button" class="preset-pill" data-preset="medical" title="Medical & clinical research">🩺 Medical</button>
+    </div>
 
     <form class="composer" id="composerForm">
       <input type="file" id="fileInput" accept=".pdf,.docx" hidden aria-label="Choose a document file to upload">
@@ -98,13 +107,23 @@
     <div class="settings-section">
       <h3>About</h3>
       <div class="settings-stats" id="settingsAbout">
-        Exam Prep Bot — an intelligent study assistant powered by Claude AI.
+        AI Knowledge Assistant — a production-ready AI platform powered by Hybrid RAG, Context-Aware Generation (CAG), and Multi-Agent Orchestration.
       </div>
       <details class="dev-options" id="devOptions">
         <summary>Developer options</summary>
         <div class="dev-options-content">
-          <input type="password" id="apiKeyInput" placeholder="X-API-Key override">
-          <button type="button" class="btn btn-primary" id="saveKeyBtn">Save</button>
+          <div class="setting-item" style="width: 100%;">
+            <label for="topKSlider" class="setting-label">Top-K Retrieval Chunks: <strong id="topKValue">4</strong></label>
+            <input type="range" id="topKSlider" min="1" max="10" step="1" value="4" class="setting-slider">
+          </div>
+          <div class="setting-item" style="width: 100%;">
+            <label for="tempSlider" class="setting-label">LLM Temperature: <strong id="tempValue">0.30</strong></label>
+            <input type="range" id="tempSlider" min="0.0" max="1.0" step="0.05" value="0.30" class="setting-slider">
+          </div>
+          <div class="dev-api-key-row">
+            <input type="password" id="apiKeyInput" placeholder="X-API-Key override">
+            <button type="button" class="btn btn-primary" id="saveKeyBtn">Save</button>
+          </div>
         </div>
         <div class="settings-stats" id="settingsStats">Loading…</div>
       </details>

@@ -54,6 +54,24 @@ async def require_api_key(api_key: str | None = Security(_api_key_header)) -> No
         )
 
 
+async def require_admin_key(api_key: str | None = Security(_api_key_header)) -> None:
+    """Guards operator-only endpoints (log tail, metrics) that must not be
+    reachable with the same key ``require_api_key`` accepts — that key is
+    deliberately embedded in every page load when ``expose_api_key_to_frontend``
+    is set, so it isn't a real boundary for anything operator-only. Unlike
+    ``require_api_key``, there is no auto-generated fallback: an unset
+    ``ADMIN_API_KEY`` disables the route entirely (404) rather than silently
+    falling back to the public key.
+    """
+    if not settings.admin_api_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not api_key or not secrets.compare_digest(api_key, settings.admin_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid admin API key. Provide it via the X-API-Key header.",
+        )
+
+
 async def require_api_key_ws(websocket: WebSocket) -> bool:
     """WebSocket equivalent of ``require_api_key``.
 

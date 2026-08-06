@@ -16,6 +16,7 @@ from app.services.agents.reflection_agent import ReflectionAgent
 from app.services.agents.retrieval_agent import RetrievalAgent
 from app.services.models import (
     AnswerWithSources,
+    ChatMessage,
     ChunkMetadata,
     IntentClassificationResult,
     QueryType,
@@ -117,7 +118,7 @@ def test_reflection_agent_falls_back_when_llm_raises():
 
 
 def test_memory_agent_records_user_and_assistant_turns():
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history)
 
     agent.record_turn("What is X?", "X is Y.", QueryType.DEFINITION)
@@ -130,7 +131,7 @@ def test_memory_agent_records_user_and_assistant_turns():
 
 
 def test_memory_agent_shares_the_same_list_reference():
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history)
     agent.record_turn("q", "a")
     assert agent.chat_history is history
@@ -198,7 +199,7 @@ def mock_retriever():
 
 @pytest.fixture()
 def orchestrator(mock_intent_classifier, mock_llm, mock_retriever):
-    history = []
+    history: list[ChatMessage] = []
     return OrchestratorAgent(
         intent_classifier=mock_intent_classifier,
         retrieval_agent=RetrievalAgent(mock_retriever),
@@ -425,7 +426,7 @@ def test_orchestrator_reflection_shortcut_skips_reflection_when_draft_is_hopeles
     confidence_scorer.calculate_answer_confidence.return_value = 0.05  # far below the 0.15 floor
     confidence_scorer.assess_hallucination_risk.return_value = "high"
 
-    history = []
+    history: list[ChatMessage] = []
     orch = OrchestratorAgent(
         intent_classifier=mock_intent_classifier,
         retrieval_agent=RetrievalAgent(mock_retriever),

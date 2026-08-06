@@ -16,6 +16,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("LLM_PROVIDER", "anthropic")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key-for-tests")
 os.environ.setdefault("APP_API_KEY", "test-api-key-for-tests")
+os.environ.setdefault("ADMIN_API_KEY", "test-admin-key-for-tests")
 # CI sets APP_API_KEY as a real job-step env var (see ci.yml), which wins
 # over setdefault() above — read back whatever actually won so the fixtures
 # below always send a key that matches settings.app_api_key, instead of a
@@ -31,6 +32,7 @@ os.environ.setdefault("UPLOAD_DIR", os.path.join(_TEST_DATA_ROOT, "uploads"))
 os.environ.setdefault("CACHE_DIR", os.path.join(_TEST_DATA_ROOT, "cache"))
 
 TEST_API_KEY = os.environ["APP_API_KEY"]
+TEST_ADMIN_API_KEY = os.environ["ADMIN_API_KEY"]
 
 
 @pytest.fixture(autouse=True)

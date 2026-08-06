@@ -1,6 +1,7 @@
 """Database initialization and session management."""
 
 from pathlib import Path
+from typing import Iterator
 
 from loguru import logger
 from sqlalchemy import create_engine
@@ -28,7 +29,7 @@ def init_db() -> None:
     logger.info("Database initialized successfully")
 
 
-def get_db() -> Session:
+def get_db() -> Iterator[Session]:
     """FastAPI dependency that yields a DB session."""
     db = SessionLocal()
     try:

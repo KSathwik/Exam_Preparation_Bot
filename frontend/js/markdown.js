@@ -43,7 +43,10 @@ export function renderMarkdown(text) {
   configureMarked();
   if (!window.marked) return escapeText(text);
   const html = window.marked.parse(text ?? "");
-  if (!window.DOMPurify) return html;
+  // Fail closed, not open: without a sanitizer present, never hand raw parsed
+  // HTML (assistant output can echo adversarial content from an uploaded
+  // document) straight to innerHTML — fall back to plain escaped text instead.
+  if (!window.DOMPurify) return escapeText(text);
   return window.DOMPurify.sanitize(html, {
     FORBID_TAGS: ["script", "style", "iframe"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],

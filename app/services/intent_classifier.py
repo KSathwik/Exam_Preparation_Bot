@@ -7,7 +7,7 @@ from loguru import logger
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import IntentClassificationResult, QueryType
 
@@ -147,7 +147,7 @@ class IntentClassifier:
             self.template_embeddings[intent] = np.mean(embeddings, axis=0)
 
     def classify(self, query: str) -> IntentClassificationResult:
-        logger.debug(f"[INTENT] Classifying: {query!r}  threshold={self.threshold}")
+        logger.debug(f"[INTENT] Classifying: {redact_query_for_log(query)}  threshold={self.threshold}")
         rule_result = self._classify_by_rules(query)
         if rule_result and rule_result["confidence"] > self.threshold:
             logger.info(
@@ -178,7 +178,7 @@ class IntentClassifier:
                 intent_scores[intent] = 0.0
         if not has_match:
             return None
-        best_intent = max(intent_scores, key=intent_scores.get)
+        best_intent = max(intent_scores, key=intent_scores.get)  # type: ignore[arg-type]
         return {
             "intent": best_intent,
             "confidence": min(intent_scores[best_intent], 0.95),
@@ -192,7 +192,7 @@ class IntentClassifier:
         for intent, tmpl_emb in self.template_embeddings.items():
             sim = cosine_similarity(query_embedding.reshape(1, -1), tmpl_emb.reshape(1, -1))[0][0]
             intent_scores[intent] = float(sim)
-        best_intent = max(intent_scores, key=intent_scores.get)
+        best_intent = max(intent_scores, key=intent_scores.get)  # type: ignore[arg-type]
         return {
             "intent": best_intent,
             "confidence": intent_scores[best_intent],

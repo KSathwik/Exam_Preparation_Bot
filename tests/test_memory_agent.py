@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 from app.models.db_models import Base, ChatMessageRecord, ChatSession, ConversationMemory
 from app.services.agents.memory_agent import MemoryAgent
-from app.services.models import QueryType
+from app.services.models import ChatMessage, QueryType
 
 
 @pytest.fixture()
@@ -34,7 +34,7 @@ def db_session_factory():
 
 
 def test_record_turn_without_persist_only_updates_chat_history(db_session_factory):
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history, persist=False, session_id="sess-1", db_session_factory=db_session_factory)
 
     agent.record_turn("What is X?", "X is Y.")
@@ -46,7 +46,7 @@ def test_record_turn_without_persist_only_updates_chat_history(db_session_factor
 
 
 def test_record_turn_with_persist_creates_session_and_messages(db_session_factory):
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history, persist=True, session_id="sess-1", db_session_factory=db_session_factory)
 
     agent.record_turn("What is X?", "X is Y.", intent=QueryType.DEFINITION)
@@ -55,6 +55,9 @@ def test_record_turn_with_persist_creates_session_and_messages(db_session_factor
     session_row = db.get(ChatSession, "sess-1")
     assert session_row is not None
     assert session_row.turn_count == 1
+    # A real turn is exactly the kind of "activity" that should move this
+    # conversation to the top of the sidebar (see ChatSession.last_activity_at).
+    assert session_row.last_activity_at is not None
 
     messages = db.query(ChatMessageRecord).filter_by(session_id="sess-1").order_by(ChatMessageRecord.id).all()
     assert len(messages) == 2
@@ -67,7 +70,7 @@ def test_record_turn_with_persist_creates_session_and_messages(db_session_factor
 
 
 def test_record_turn_persist_without_session_id_skips_gracefully():
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history, persist=True, session_id=None, db_session_factory=MagicMock())
 
     agent.record_turn("q", "a")  # must not raise
@@ -76,7 +79,7 @@ def test_record_turn_persist_without_session_id_skips_gracefully():
 
 
 def test_persist_turn_rolls_back_and_keeps_history_on_db_failure(db_session_factory):
-    history = []
+    history: list[ChatMessage] = []
     agent = MemoryAgent(history, persist=True, session_id="sess-1", db_session_factory=db_session_factory)
     broken_session = MagicMock()
     broken_session.get.side_effect = RuntimeError("db down")
@@ -315,7 +318,11 @@ def test_get_recent_turns_returns_empty_without_persist_or_session_id(db_session
 
 
 def test_get_recent_turns_handles_db_failure_gracefully():
-    agent = MemoryAgent([], persist=True, session_id="sess-1", db_session_factory=MagicMock())
-    agent.db_session_factory.side_effect = RuntimeError("db down")
+    agent = MemoryAgent(
+        [],
+        persist=True,
+        session_id="sess-1",
+        db_session_factory=MagicMock(side_effect=RuntimeError("db down")),
+    )
 
     assert agent.get_recent_turns("sess-1") == []

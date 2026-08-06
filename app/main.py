@@ -1,5 +1,5 @@
 """
-Exam Prep Bot — FastAPI Backend
+AI Knowledge Assistant — FastAPI Backend
 Unified application entry point.
 """
 
@@ -22,53 +22,90 @@ from app.api import conversations, documents, health, queries
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
-from app.core.security import ACTIVE_API_KEY, require_api_key
+from app.core.security import ACTIVE_API_KEY, require_admin_key
 
 # ── Loguru configuration ──────────────────────────────────────────────
+# Rotation/retention/compression/JSON-vs-text are all settings-driven (see
+# config.py) rather than hardcoded, so an operator can tune them via .env
+# without a code change + redeploy. `enqueue=True` on every file sink makes
+# writes thread-safe — route handlers log from a thread-pool worker, not
+# just the event loop (see CLAUDE.md's "route handlers offload blocking
+# work" note).
+_TEXT_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}"
+
 logger.remove()
 logger.add(
     sys.stderr,
     level=settings.log_level,
     format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:<8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
 )
+_file_sink_kwargs = {
+    "rotation": settings.log_rotation,
+    "retention": settings.log_retention,
+    "compression": settings.log_compression,
+    "enqueue": True,
+    "serialize": settings.log_json,
+}
 logger.add(
-    settings.log_file,
+    settings.log_file,  # type: ignore[call-overload]
     level="DEBUG",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} - {message}",
-    rotation="10 MB",
-    retention="7 days",
-    compression="zip",
-    enqueue=True,
+    format=_TEXT_FORMAT if not settings.log_json else "{message}",
+    **_file_sink_kwargs,
 )
+# Separate error-only sink — lets ops tail/alert on failures without wading
+# through DEBUG/INFO noise from the combined app log.
+logger.add(
+    settings.error_log_file,  # type: ignore[call-overload]
+    level="ERROR",
+    format=_TEXT_FORMAT if not settings.log_json else "{message}",
+    **_file_sink_kwargs,
+)
+
+
+def _redact_dsn(dsn: str) -> str:
+    """Strip embedded credentials from a DB connection string before logging
+    it — e.g. postgresql://user:pass@host/db -> postgresql://***@host/db.
+    SQLite paths (no "@") pass through unchanged."""
+    if "://" not in dsn or "@" not in dsn:
+        return dsn
+    scheme, rest = dsn.split("://", 1)
+    _, host_part = rest.split("@", 1)
+    return f"{scheme}://***@{host_part}"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 60)
-    logger.info("Starting Exam Prep Bot...")
+    logger.info("Starting AI Knowledge Assistant...")
     logger.info(f"LLM Provider : {settings.llm_provider}")
     logger.info(f"Model Name   : {settings.model_name or '(provider default)'}")
     logger.info(f"Embedding    : {settings.embedding_model}")
-    logger.info(f"Database URL : {settings.database_url}")
+    logger.info(f"Database URL : {_redact_dsn(settings.database_url)}")
     logger.info(f"Log Level    : {settings.log_level}")
     logger.info(f"Debug Mode   : {settings.debug_mode}")
     logger.info("=" * 60)
+
+    import asyncio
 
     init_db()
 
     from app.core.dependencies import get_bot
 
-    get_bot()
-    logger.info("Bot initialized successfully — ready to serve requests")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(asyncio.to_thread(get_bot))
+    except RuntimeError:
+        pass
+    logger.info("Application initialized successfully — server ready to serve requests")
 
     yield
 
-    logger.info("Shutting down Exam Prep Bot...")
+    logger.info("Shutting down AI Knowledge Assistant...")
 
 
 app = FastAPI(
     title=settings.app_name,
-    description="Intelligent exam preparation chatbot powered by Claude + RAG",
+    description="Production-ready AI Knowledge Assistant powered by Hybrid RAG + CAG with Multi-Agent Orchestration",
     version=settings.app_version,
     lifespan=lifespan,
 )
@@ -84,25 +121,34 @@ app.add_middleware(
 
 # Rate limiting (per client IP) on expensive/LLM-calling endpoints
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
+
+
+def _log_path(path: str, max_len: int = 100) -> str:
+    """Truncate a request path before logging it. Most routes are short by
+    nature — a long one is almost always a path parameter carrying free-text
+    user content (e.g. GET /api/intent/{query}), which would otherwise bypass
+    the query-text redaction applied everywhere else (see
+    redact_query_for_log) simply by riding in the URL path instead of a
+    logged variable."""
+    return path if len(path) <= max_len else f"{path[:max_len]}...(len={len(path)})"
 
 
 # Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
-    logger.info(f"→ {request.method} {request.url.path}")
+    path = _log_path(request.url.path)
+    logger.info(f"→ {request.method} {path}")
     try:
         response = await call_next(request)
         duration = time.time() - start
-        logger.info(
-            f"← {request.method} {request.url.path}  status={response.status_code}  duration={duration:.3f}s"
-        )
+        logger.info(f"← {request.method} {path}  status={response.status_code}  duration={duration:.3f}s")
         return response
     except Exception as e:
         duration = time.time() - start
-        logger.error(f"✗ {request.method} {request.url.path}  error={e}  duration={duration:.3f}s")
+        logger.error(f"✗ {request.method} {path}  error={e}  duration={duration:.3f}s")
         raise
 
 
@@ -120,7 +166,7 @@ app.include_router(conversations.router, prefix="/api/conversations", tags=["Con
 async def root():
     html_path = Path("frontend/index.html")
     if not html_path.exists():
-        return {"message": "Exam Prep Bot API is running. Visit /docs for Swagger UI."}
+        return {"message": "AI Knowledge Assistant API is running. Visit /docs for Swagger UI."}
 
     if not (settings.expose_api_key_to_frontend and ACTIVE_API_KEY):
         return FileResponse(str(html_path))
@@ -149,7 +195,7 @@ async def get_system_config():
     }
 
 
-@app.get("/api/metrics", tags=["Monitoring"], dependencies=[Depends(require_api_key)])
+@app.get("/api/metrics", tags=["Monitoring"], dependencies=[Depends(require_admin_key)])
 async def get_metrics():
     from app.core.dependencies import get_bot
 

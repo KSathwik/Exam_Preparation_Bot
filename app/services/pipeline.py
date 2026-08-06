@@ -19,8 +19,8 @@ from .retriever import HybridRetriever
 from .validator import ConfidenceScorer, SpanExtractor
 
 
-class ExamPrepBot:
-    """Main exam prep bot pipeline.
+class KnowledgeAssistantPipeline:
+    """Main AI Knowledge Assistant pipeline powered by Hybrid RAG + CAG + Multi-Agent Orchestration.
 
     Accepts pre-built singletons via constructor so that the DI layer
     (``app.core.dependencies``) controls resource lifetime. Query answering
@@ -36,7 +36,7 @@ class ExamPrepBot:
         intent_classifier: Optional[IntentClassifier] = None,
         llm=None,
     ):
-        logger.info("Initializing ExamPrepBot")
+        logger.info("Initializing KnowledgeAssistantPipeline")
         self.vector_store_manager = vector_store_manager or VectorStoreManager()
         self.intent_classifier = intent_classifier or IntentClassifier()
         self.retriever = HybridRetriever(self.vector_store_manager)
@@ -68,7 +68,7 @@ class ExamPrepBot:
     # ------------------------------------------------------------------
     # Document upload
     # ------------------------------------------------------------------
-    def upload_document(self, file_path: str, file_type: str = None) -> dict:
+    def upload_document(self, file_path: str, file_type: Optional[str] = None) -> dict:
         logger.info(f"Uploading document: {file_path}")
         start = time.time()
         try:
@@ -131,6 +131,10 @@ class ExamPrepBot:
         }
 
 
-def create_bot() -> ExamPrepBot:
+# Backward compatibility alias
+ExamPrepBot = KnowledgeAssistantPipeline
+
+
+def create_bot() -> KnowledgeAssistantPipeline:
     """Factory — prefer ``get_bot()`` from dependencies for DI."""
-    return ExamPrepBot()
+    return KnowledgeAssistantPipeline()

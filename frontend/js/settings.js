@@ -4,6 +4,7 @@
 
 import { getStoredThemeChoice, applyTheme } from "./theme.js";
 import { getApiKey, setApiKey, getStats } from "./api.js";
+import { state, setTopK, setTemperature } from "./state.js";
 
 function highlightThemeControl(choice) {
   document.querySelectorAll("#themeControl button").forEach((btn) => {
@@ -36,11 +37,40 @@ export function initSettings() {
   const saveKeyBtn = document.getElementById("saveKeyBtn");
   const devOptions = document.getElementById("devOptions");
 
+  const topKSlider = document.getElementById("topKSlider");
+  const topKValue = document.getElementById("topKValue");
+  const tempSlider = document.getElementById("tempSlider");
+  const tempValue = document.getElementById("tempValue");
+
   openBtn.addEventListener("click", () => {
     highlightThemeControl(getStoredThemeChoice());
     apiKeyInput.value = getApiKey();
+    if (topKSlider && topKValue) {
+      topKSlider.value = state.topK;
+      topKValue.textContent = String(state.topK);
+    }
+    if (tempSlider && tempValue) {
+      tempSlider.value = state.temperature;
+      tempValue.textContent = Number(state.temperature).toFixed(2);
+    }
     modal.showModal();
   });
+
+  if (topKSlider && topKValue) {
+    topKSlider.addEventListener("input", () => {
+      const val = parseInt(topKSlider.value, 10);
+      topKValue.textContent = String(val);
+      setTopK(val);
+    });
+  }
+
+  if (tempSlider && tempValue) {
+    tempSlider.addEventListener("input", () => {
+      const val = parseFloat(tempSlider.value);
+      tempValue.textContent = val.toFixed(2);
+      setTemperature(val);
+    });
+  }
 
   closeBtn.addEventListener("click", () => modal.close());
   modal.addEventListener("click", (e) => {

@@ -8,6 +8,7 @@ thread, and a bare `sqlite:///:memory:` connection is otherwise per-thread
 (see the equivalent note in tests/test_documents.py).
 """
 
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -44,9 +45,14 @@ def db_session_factory():
     app.dependency_overrides.pop(get_db, None)
 
 
-def _seed_session(db_session_factory, session_id, device_id="device-a", title=None, turn_count=1):
+def _seed_session(
+    db_session_factory, session_id, device_id="device-a", title=None, turn_count=1, last_activity_at=None
+):
     db = db_session_factory()
-    db.add(ChatSession(id=session_id, device_id=device_id, title=title, turn_count=turn_count))
+    session = ChatSession(id=session_id, device_id=device_id, title=title, turn_count=turn_count)
+    if last_activity_at is not None:
+        session.last_activity_at = last_activity_at
+    db.add(session)
     db.flush()
     db.add(ChatMessageRecord(session_id=session_id, role="user", content="hello", token_count=1))
     db.add(ChatMessageRecord(session_id=session_id, role="assistant", content="hi there", token_count=3))
@@ -69,8 +75,15 @@ def test_list_conversations_empty_for_unknown_device(client, db_session_factory)
 
 
 def test_list_conversations_filters_by_device_and_orders_by_recency(client, db_session_factory):
-    _seed_session(db_session_factory, "sess-a1", device_id="device-a", title="First")
-    _seed_session(db_session_factory, "sess-a2", device_id="device-a", title="Second")
+    now = datetime.now()
+    _seed_session(db_session_factory, "sess-a1", device_id="device-a", title="First", last_activity_at=now)
+    _seed_session(
+        db_session_factory,
+        "sess-a2",
+        device_id="device-a",
+        title="Second",
+        last_activity_at=now + timedelta(minutes=5),
+    )
     _seed_session(db_session_factory, "sess-b1", device_id="device-b", title="Other device")
 
     resp = client.get("/api/conversations", params={"device_id": "device-a"})
@@ -80,6 +93,32 @@ def test_list_conversations_filters_by_device_and_orders_by_recency(client, db_s
     ids = {c["session_id"] for c in data["conversations"]}
     assert ids == {"sess-a1", "sess-a2"}
     assert data["conversations"][0]["message_count"] == 2
+    # sess-a2 has the more recent last_activity_at, so it must lead despite
+    # being created after sess-a1 — this is the "recency" the test name claims.
+    assert [c["session_id"] for c in data["conversations"]] == ["sess-a2", "sess-a1"]
+
+
+def test_renaming_conversation_does_not_change_sidebar_order(client, db_session_factory):
+    """Regression test: renaming used to bump ChatSession.updated_at, which
+    list_conversations sorted by — so a rename silently jumped a conversation
+    to the top. Renaming is metadata, not activity, and must never reorder
+    the sidebar (see ChatSession.last_activity_at)."""
+    now = datetime.now()
+    _seed_session(db_session_factory, "sess-older", title="Older", last_activity_at=now)
+    _seed_session(
+        db_session_factory, "sess-newer", title="Newer", last_activity_at=now + timedelta(minutes=5)
+    )
+
+    resp = client.get("/api/conversations", params={"device_id": "device-a"})
+    before = [c["session_id"] for c in resp.json()["conversations"]]
+    assert before == ["sess-newer", "sess-older"]
+
+    rename_resp = client.patch("/api/conversations/sess-older", json={"title": "Renamed"})
+    assert rename_resp.status_code == 200
+
+    resp2 = client.get("/api/conversations", params={"device_id": "device-a"})
+    after = [c["session_id"] for c in resp2.json()["conversations"]]
+    assert after == before
 
 
 def test_get_conversation_returns_messages_in_order(client, db_session_factory):

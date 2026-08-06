@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import app.api.queries as queries_module
-from app.services.models import AnswerWithSources, ChatMessage, IntentClassificationResult, QueryType
+from app.services.models import AnswerWithSources, IntentClassificationResult, QueryType
 from tests.conftest import TEST_API_KEY
 
 
@@ -129,19 +129,6 @@ def test_batch_partial_failure_reported(client, mock_bot):
     assert data["failed"] == 1
 
 
-def test_history_roundtrip(client, mock_bot):
-    mock_bot.chat_history = [
-        ChatMessage(role="user", content="hi", timestamp="2024-01-01", intent_type=QueryType.VAGUE)
-    ]
-    resp = client.get("/api/history")
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 1
-
-    resp = client.delete("/api/history")
-    assert resp.status_code == 200
-    assert mock_bot.chat_history == []
-
-
 def test_websocket_streams_only_the_final_answer_and_completes(client, mock_bot):
     """Drafting and reflection both happen silently server-side (see
     OrchestratorAgent.run) — the websocket client only ever sees an "intent"
@@ -221,6 +208,30 @@ def test_websocket_rejects_overlong_query(client, mock_bot):
 
     assert msg["type"] == "error"
     assert "1000" in msg["message"]
+    mock_bot.answer_question.assert_not_called()
+
+
+def test_websocket_rejects_whitespace_only_query(client, mock_bot):
+    """A blank string is caught by ``if not query``, but "   " still has
+    length > 0 — without an explicit .strip() check it would sail through
+    to the pipeline as a real "vague"-intent query instead of being
+    rejected like an empty string is."""
+    with client.websocket_connect(f"/api/ws?api_key={TEST_API_KEY}") as ws:
+        ws.send_text('{"query": "   "}')
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    assert "required" in msg["message"].lower()
+    mock_bot.answer_question.assert_not_called()
+
+
+def test_ask_rejects_whitespace_only_query(client, mock_bot):
+    """Same gap as the websocket path, but on the REST QueryRequest schema:
+    Field(min_length=1) alone doesn't reject "   " since it still has
+    length >= 1 — only an explicit .strip() check via a field_validator
+    catches it, same rule BatchQueryRequest already enforces per-item."""
+    resp = client.post("/api/ask", json={"query": "   "})
+    assert resp.status_code == 422
     mock_bot.answer_question.assert_not_called()
 
 

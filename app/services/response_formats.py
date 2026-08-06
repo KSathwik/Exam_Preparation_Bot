@@ -110,11 +110,14 @@ RESPONSE_FORMAT_TEMPLATES: Dict[ResponseFormat, FormatTemplate] = {
     ),
     ResponseFormat.KEY_POINTS: FormatTemplate(
         prompt_instructions=(
-            "Respond ONLY as a numbered or bulleted list of key points. Each point must be "
-            "1-2 short sentences — never a paragraph. No introduction or closing sentence "
-            "outside the list. Bold the key term or idea at the start of each point."
+            "Respond ONLY as a numbered or bulleted list of 5-8 key points (fewer if the "
+            "material genuinely doesn't support that many — never pad to hit the count). Each "
+            "point must be 1-2 short sentences — never a paragraph. Each point MUST start on "
+            "its own new line with a real Markdown list marker (`1.`/`-`) — never run multiple "
+            "points together in one paragraph of continuous text. No introduction or closing "
+            "sentence outside the list. Bold the key term or idea at the start of each point."
         ),
-        structure_note="Numbered/bulleted list only, each point 1-2 short sentences, no prose wrapper.",
+        structure_note="Numbered/bulleted list of 5-8 points, each 1-2 short sentences, no prose wrapper.",
         default_length=ResponseLength.SHORT,
     ),
     ResponseFormat.REVISION_NOTES: FormatTemplate(
@@ -156,18 +159,20 @@ RESPONSE_FORMAT_TEMPLATES: Dict[ResponseFormat, FormatTemplate] = {
     ),
     ResponseFormat.STEPS: FormatTemplate(
         prompt_instructions=(
-            "Respond as a numbered list of steps in the order they occur. Each step is one "
-            "short sentence starting with an action verb where possible. No prose paragraphs "
-            "before or between steps."
+            "Respond as a numbered list of steps in the order they occur, each on its own new "
+            "line with a real Markdown list marker — never run steps together in one paragraph "
+            "of continuous text. Each step is one short sentence starting with an action verb "
+            "where possible. No prose paragraphs before or between steps."
         ),
         structure_note="Numbered steps in order, one short sentence each, no surrounding prose.",
         default_length=ResponseLength.MEDIUM,
     ),
     ResponseFormat.TIMELINE: FormatTemplate(
         prompt_instructions=(
-            "Respond as a chronological timeline: one bullet per date/period/stage, in "
-            "chronological order, each formatted as `**<date/period>:** <what happened, one "
-            "sentence>`. No surrounding prose."
+            "Respond as a chronological timeline: one bullet per date/period/stage, each on its "
+            "own new line — never run entries together in one paragraph — in chronological "
+            "order, formatted as `**<date/period>:** <what happened, one sentence>`. No "
+            "surrounding prose."
         ),
         structure_note="Chronological bullet list, one date/period per bullet, no surrounding prose.",
         default_length=ResponseLength.MEDIUM,
@@ -184,46 +189,55 @@ RESPONSE_FORMAT_TEMPLATES: Dict[ResponseFormat, FormatTemplate] = {
     ),
     ResponseFormat.FLASHCARDS: FormatTemplate(
         prompt_instructions=(
-            "Produce flashcards, one concept per card, each formatted exactly as:\n"
+            "Produce 5-8 flashcards (fewer if the material doesn't support that many), one "
+            "concept per card, each formatted exactly as:\n"
             "**Q:** <question>\n**A:** <answer>\n\n---\n\n"
             "One concept per card — do not combine multiple facts into one card. No "
             "introduction or closing text outside the cards."
         ),
-        structure_note="One **Q:**/**A:** pair per concept, separated by `---`, nothing else.",
-        default_length=ResponseLength.MEDIUM,
+        structure_note="5-8 **Q:**/**A:** pairs, one concept each, separated by `---`, nothing else.",
+        default_length=ResponseLength.LONG,
     ),
     ResponseFormat.MCQ: FormatTemplate(
         prompt_instructions=(
-            "Generate numbered multiple-choice questions. Each question has exactly 4 lettered "
-            "options (A-D), followed on the next line by `**Answer:** <letter> — <one-sentence "
-            "explanation of why it's correct>`. No introduction or closing text."
+            "Generate 5 numbered multiple-choice questions — no more, even if the material "
+            "could support additional ones; pick the 5 most exam-relevant. Each question and "
+            "each of its options MUST be on its own new line — never run a question, its "
+            "options, and its answer together as continuous prose. Each question has exactly 4 "
+            "lettered options (A-D), followed on the next line by `**Answer:** <letter> — "
+            "<one-sentence explanation of why it's correct>`. No introduction or closing text."
         ),
-        structure_note="Numbered MCQs, 4 lettered options each, followed by a bolded answer + brief reason.",
+        structure_note="Exactly 5 numbered MCQs, 4 lettered options each, bolded answer + brief reason.",
         default_length=ResponseLength.LONG,
     ),
     ResponseFormat.EXAM_QUESTIONS: FormatTemplate(
         prompt_instructions=(
-            "Generate the most likely exam questions based on this material, as a numbered "
-            "list. After each question, add one short line (in italics) noting what a strong "
-            "answer should cover — not a full answer, just the key points to hit."
+            "Generate the 5-8 most likely exam questions based on this material, as a numbered "
+            "list — each question, and the hint line beneath it, MUST start on its own new "
+            "line; never combine multiple questions into one paragraph of running text, and "
+            "never write a full combined answer key at the end instead of per-question hints. "
+            "After each question, add one short line (in italics) noting what a strong answer "
+            "should cover — not a full answer, just the key points to hit."
         ),
-        structure_note="Numbered likely exam questions, each with a short italic hint of key points to cover.",
+        structure_note="5-8 numbered likely exam questions, each with a short italic hint of key points.",
         default_length=ResponseLength.LONG,
     ),
     ResponseFormat.INTERVIEW_QUESTIONS: FormatTemplate(
         prompt_instructions=(
-            "Generate likely interview questions on this topic, as a numbered list, each "
+            "Generate the 5-8 most likely interview questions on this topic, as a numbered "
+            "list — each on its own new line, never run together as one paragraph — each "
             "followed by a one-sentence hint of what a strong answer should emphasize."
         ),
-        structure_note="Numbered interview questions, each with a one-sentence answer hint.",
+        structure_note="5-8 numbered interview questions, each with a one-sentence answer hint.",
         default_length=ResponseLength.LONG,
     ),
     ResponseFormat.VIVA_QUESTIONS: FormatTemplate(
         prompt_instructions=(
-            "Generate likely viva (oral exam) questions on this topic, as a numbered list, "
+            "Generate the 5-8 most likely viva (oral exam) questions on this topic, as a "
+            "numbered list — each on its own new line, never run together as one paragraph — "
             "each followed by a one-sentence hint of what a strong verbal answer should cover."
         ),
-        structure_note="Numbered viva questions, each with a one-sentence answer hint.",
+        structure_note="5-8 numbered viva questions, each with a one-sentence answer hint.",
         default_length=ResponseLength.LONG,
     ),
     ResponseFormat.ONE_LINE: FormatTemplate(

@@ -191,6 +191,13 @@ button:focus-visible,
   display:grid;
   grid-template-columns:1fr var(--sidebar-width);
   height:100vh;
+  /* Without this, a grid row with an "auto" track sizes itself to its
+     items' content-based intrinsic height when that content is taller than
+     100vh (e.g. many conversations) — the row grows past the viewport and
+     the whole document starts scrolling instead of the intended inner
+     scroll region. Clamping the shell itself is what makes each column
+     responsible for containing its own overflow. */
+  overflow:hidden;
 }
 
 /* Always position:fixed + hidden regardless of viewport width, so this
@@ -209,6 +216,20 @@ button:focus-visible,
   display:flex;
   flex-direction:column;
   min-width:0;
+  /* Root cause of the "sidebar can't scroll, content gets pushed down" bug:
+     .sidebar has no height of its own — it's stretched to fill .app-shell's
+     grid row. But grid computes that row's size from its items' content-based
+     intrinsic height first, and a flex column's automatic min-height is its
+     content size unless overflow here is non-visible. With 60+ conversations
+     that content-based height happily exceeds 100vh, so the *row itself*
+     grows past the viewport — .conversation-list's own overflow-y:auto never
+     gets a bounded height to clip against. min-height:0 stops this container
+     from reporting its content size upward; overflow:hidden makes it the
+     boundary so only .conversation-list (below) scrolls internally.
+     Standard flexbugs #1 fix, applied at every ancestor between the
+     scrollable list and the viewport-height root, not just the list itself. */
+  min-height:0;
+  overflow:hidden;
   transition:transform var(--transition-base);
 }
 
@@ -220,7 +241,14 @@ button:focus-visible,
   font-weight:700;
   font-size:16px;
   letter-spacing:-.01em;
+  width:100%;
+  background:none;border:none;
+  color:inherit;font-family:inherit;text-align:left;
+  cursor:pointer;border-radius:var(--radius-sm);
+  transition:opacity var(--transition-fast);
 }
+.sidebar-header:hover{opacity:.75}
+.sidebar-header:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 .sidebar-header .logo-mark{
   width:26px;height:26px;border-radius:var(--radius-sm);
   background:var(--gradient-primary);color:#fff;
@@ -336,22 +364,49 @@ button:focus-visible,
 .conversation-menu button:hover{background:var(--color-surface-alt)}
 .conversation-menu button.danger{color:var(--color-error-fg)}
 
-/* AI Hub — always-visible sidebar shortcuts to external AI assistants and
-   knowledge sources (see aiHub.js). Deliberately plain buttons in normal
-   document flow, not a dropdown/menu: the whole point is that students
-   always know where to find these, without opening anything first. */
+/* AI Hub — collapsible sidebar shortcuts to external AI assistants and
+   knowledge sources (see aiHub.js). Each group is a disclosure, collapsed by
+   default so Recent Chats (flex:1 in .sidebar-search's sibling above) gets
+   the sidebar's free vertical space instead of splitting it with two lists
+   most students open only occasionally. */
 .sidebar-ai-hub{
   border-top:1px solid var(--color-border);
   padding:var(--space-3) var(--space-2);
-  display:flex;flex-direction:column;gap:var(--space-3);
+  display:flex;flex-direction:column;gap:var(--space-2);
   flex-shrink:0;
 }
 .ai-hub-group{display:flex;flex-direction:column;gap:1px}
 .ai-hub-group-header{
   display:flex;align-items:center;gap:var(--space-2);
-  padding:0 var(--space-3) var(--space-1);
-  font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  width:100%;text-align:left;
+  padding:var(--space-2) var(--space-3);
+  background:none;border:none;border-radius:var(--radius-sm);
+  font:inherit;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
   color:var(--color-text-faint);
+  cursor:pointer;
+  transition:background var(--transition-fast),color var(--transition-fast);
+}
+.ai-hub-group-header:hover{background:var(--color-border);color:var(--color-text-muted)}
+.ai-hub-group-header:focus-visible{outline:2px solid var(--color-primary);outline-offset:-2px}
+.ai-hub-chevron{
+  margin-left:auto;font-size:10px;line-height:1;
+  transition:transform var(--transition-fast);
+}
+.ai-hub-group.collapsed .ai-hub-chevron{transform:rotate(-90deg)}
+.ai-hub-group-items{
+  display:grid;
+  grid-template-rows:1fr;
+  opacity:1;
+  transition:grid-template-rows var(--transition-base),opacity var(--transition-base);
+}
+.ai-hub-group-items-inner{
+  overflow:hidden;
+  display:flex;flex-direction:column;gap:1px;
+  min-height:0;
+}
+.ai-hub-group.collapsed .ai-hub-group-items{
+  grid-template-rows:0fr;
+  opacity:0;
 }
 .ai-hub-item{
   display:flex;align-items:center;gap:var(--space-2);
@@ -398,7 +453,7 @@ button:focus-visible,
 .chat-column{
   order:1;
   display:flex;flex-direction:column;
-  height:100vh;min-width:0;position:relative;
+  height:100vh;min-width:0;min-height:0;overflow:hidden;position:relative;
 }
 
 .mobile-topbar{
@@ -412,6 +467,14 @@ button:focus-visible,
   background:none;border:1px solid var(--color-border);border-radius:var(--radius-sm);
   padding:6px 10px;cursor:pointer;font-size:15px;
 }
+.mobile-topbar-title{
+  background:none;border:none;color:inherit;font-family:inherit;
+  font-weight:700;font-size:inherit;padding:4px 6px;margin:0;
+  cursor:pointer;border-radius:var(--radius-sm);
+  transition:opacity var(--transition-fast);
+}
+.mobile-topbar-title:hover{opacity:.75}
+.mobile-topbar-title:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 
 .messages-box{
   flex:1;overflow-y:auto;
@@ -736,13 +799,20 @@ button:focus-visible,
 /* ── Settings modal ────────────────────────────────────────────────── */
 
 dialog#settingsModal{
-  width:min(480px,92vw);
+  position:fixed !important;
+  top:50% !important;
+  left:50% !important;
+  transform:translate(-50%,-50%) !important;
+  margin:0 !important;
+  width:min(480px,92vw) !important;
+  max-height:min(85vh,650px) !important;
   border:1px solid var(--color-border);
   border-radius:var(--radius-lg);
   padding:0;
   background:var(--color-surface);
   color:var(--color-text);
   box-shadow:var(--shadow-lg);
+  overflow-y:auto;
 }
 dialog#settingsModal::backdrop{background:rgba(10,11,20,.45)}
 .settings-header{
@@ -768,13 +838,44 @@ dialog#settingsModal::backdrop{background:rgba(10,11,20,.45)}
 .segmented-control button:last-child{border-right:none}
 .segmented-control button.active{background:var(--color-primary-soft);color:var(--color-primary)}
 
+.setting-item{display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3);width:100%}
+.setting-label{font-size:13px;color:var(--color-text-muted);display:flex;justify-content:space-between;align-items:center}
+.setting-label strong{color:var(--color-primary);font-weight:700}
+.setting-slider{
+  width:100%;accent-color:var(--color-primary);cursor:pointer;
+  height:6px;border-radius:var(--radius-pill);background:var(--color-surface-alt);
+}
+
+/* ── Domain Preset Selector Bar ──────────────────────────────────── */
+
+.preset-selector-bar{
+  display:flex;align-items:center;gap:var(--space-2);
+  max-width:var(--chat-max-width);width:100%;margin:0 auto var(--space-2);
+  padding:0 var(--space-2);overflow-x:auto;scrollbar-width:none;
+}
+.preset-selector-bar::-webkit-scrollbar{display:none}
+.preset-label{font-size:12px;font-weight:700;color:var(--color-text-faint);text-transform:uppercase;letter-spacing:.04em;margin-right:var(--space-1);flex-shrink:0}
+.preset-pill{
+  padding:5px 12px;border-radius:var(--radius-pill);
+  border:1px solid var(--color-border);background:var(--color-surface);
+  color:var(--color-text-muted);font-size:12.5px;font-weight:600;font-family:inherit;
+  cursor:pointer;white-space:nowrap;flex-shrink:0;
+  transition:all var(--transition-fast);
+}
+.preset-pill:hover{background:var(--color-surface-alt);color:var(--color-text);border-color:var(--color-primary-soft)}
+.preset-pill.active{
+  background:var(--gradient-primary-soft);color:var(--color-primary);
+  border-color:var(--color-primary);box-shadow:var(--shadow-sm);
+}
+
 .settings-stats{font-size:13px;color:var(--color-text-muted);line-height:1.9}
 .settings-stats strong{color:var(--color-text)}
 
 .dev-options{margin-top:var(--space-3)}
 .dev-options summary{cursor:pointer;font-size:12.5px;color:var(--color-text-faint);list-style:none}
 .dev-options summary::-webkit-details-marker{display:none}
-.dev-options-content{margin-top:var(--space-3);display:flex;gap:var(--space-2)}
+.dev-options-content{margin-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-3)}
+.dev-api-key-row{display:flex;gap:var(--space-2);width:100%}
 .dev-options .settings-stats{margin-top:var(--space-3)}
 .dev-options-content input{
   flex:1;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);

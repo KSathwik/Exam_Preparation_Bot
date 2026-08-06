@@ -173,7 +173,11 @@ class MemoryAgent:
                 token_count=assistant_tokens,
             )
             db.add(assistant_msg)
-            session_row.turn_count += 1
+            session_row.turn_count += 1  # type: ignore[assignment]
+            # The only place last_activity_at should move — a real turn, not
+            # a title edit (see ChatSession.last_activity_at's comment and
+            # list_conversations' order_by).
+            session_row.last_activity_at = datetime.now()  # type: ignore[assignment]
             db.flush()
 
             self._maybe_summarize(db, session_row, assistant_msg, session_id)
@@ -248,7 +252,7 @@ class MemoryAgent:
         if self.vector_store_manager is not None:
             try:
                 self.vector_store_manager.add_memory(summary_text, session_id=session_id, memory_id=memory_id)
-                memory_row.embedded = True
+                memory_row.embedded = True  # type: ignore[assignment]
             except Exception as exc:
                 logger.warning(
                     f"[MEMORY] Embedding summary failed — row kept with embedded=False for retry: "

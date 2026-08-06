@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from loguru import logger
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import ChatMessage, QueryType, RetrievedChunk
 from .response_formats import LENGTH_MAX_TOKENS, RESPONSE_FORMAT_TEMPLATES, ResponseFormat
@@ -61,7 +61,7 @@ class _BaseLLM(ABC):
         """
         template = RESPONSE_FORMAT_TEMPLATES[response_format]
         system_prompt = (
-            "You are a helpful study assistant for a student preparing for exams.\n"
+            "You are an AI Knowledge Assistant grounded entirely in the provided document context.\n"
             f"{template.prompt_instructions}\n\n"
             "Respond with ONLY a JSON object of this exact shape:\n"
             '{"answer": "<your answer as a plain string>", '
@@ -75,16 +75,19 @@ class _BaseLLM(ABC):
             "headings/list items) MUST be escaped as \\n, not literal line breaks.\n"
             "If a RECENT CONVERSATION is provided below, use it only to resolve what the current "
             'question is referring to (pronouns like "it"/"that", or "the second one") — never '
-            "as a source of facts. Every factual claim must still come from the document excerpts."
+            "as a source of facts. Every factual claim must still come from the document content.\n"
+            'In "answer", refer to the source material as "the document" or "your uploaded '
+            'material" — never as "excerpts" or "chunks", which are internal terms a student '
+            "wouldn't recognize."
         )
         context = self._format_context(retrieved_chunks)
         user_message = (
             f"{self._format_history(history)}"
-            f'Based on the following document excerpts, answer this query: "{query}"\n\n'
-            f"DOCUMENT EXCERPTS:\n{context}\n\n"
+            f'Based on the following material from the uploaded document(s), answer this query: "{query}"\n\n'
+            f"DOCUMENT CONTENT:\n{context}\n\n"
             f'Remember, for the "answer" field:\n'
-            f"1. Answer ONLY based on the provided excerpts\n"
-            f"2. If the answer is not in the excerpts, say so clearly\n"
+            f"1. Answer ONLY based on the provided material\n"
+            f"2. If the answer is not in the document, say so clearly\n"
             f"3. Be accurate and cite the source pages when relevant\n"
             f"4. Follow the structure instructions above exactly — do not fall back to plain "
             f"prose paragraphs if a specific structure (list, table, flashcards, etc.) was requested\n"
@@ -105,11 +108,15 @@ class _BaseLLM(ABC):
             raw = self._call(system_prompt, user_message, max_tokens=max_tokens + 500)
             duration = time.time() - start
             result = self._parse_answer_with_claims(raw)
+            # Normalize result to concrete types so callers and loggers don't
+            # need to guard against None or unexpected shapes.
+            answer = result.get("answer") or ""
+            claims = result.get("claims") or []
             logger.info(
                 f"LLM generate_answer_with_claims OK: duration={duration:.2f}s  "
-                f"answer_length={len(result['answer'])}  claims_found={len(result['claims'])}"
+                f"answer_length={len(answer)}  claims_found={len(claims)}"
             )
-            return result
+            return {"answer": answer, "claims": claims}
         except Exception as e:
             duration = time.time() - start
             logger.error(
@@ -160,6 +167,15 @@ class _BaseLLM(ABC):
     @staticmethod
     def _parse_answer_with_claims(raw: str) -> dict:
         s, e = raw.find("{"), raw.rfind("}") + 1
+        # A response that hit max_tokens mid-generation (a genuinely verbose
+        # MCQ/exam-questions answer, say) never emits a closing brace at all —
+        # raw.rfind("}") then returns -1, and requiring e > s here would skip
+        # every recovery tier below entirely, even though there's a perfectly
+        # readable partial answer sitting right after the opening brace. Fall
+        # back to "rest of the text from the opening brace" so at least the
+        # best-effort extraction below still gets a chance.
+        if s != -1 and e <= s:
+            e = len(raw)
         if s != -1 and e > s:
             repaired = _BaseLLM._escape_raw_newlines_in_json_strings(raw[s:e])
             try:
@@ -183,10 +199,55 @@ class _BaseLLM(ABC):
                     return {"answer": recovered, "claims": []}
                 except json.JSONDecodeError:
                     pass
+            # Both recovery attempts above assume the answer text itself has
+            # no unescaped quote in it — a claim-heavy, list/table-heavy
+            # answer (MCQs, comparisons, ...) occasionally has exactly that
+            # (e.g. quoting a term), which stops the regex's own quote
+            # matching short and both parses above fail on the truncated
+            # fragment. Last resort: locate the "answer" field by its
+            # structural boundary with "claims" instead of by quote-matching,
+            # and hand-unescape the common sequences — never strictly
+            # validated JSON, but strictly better than showing the user a
+            # literal JSON envelope (braces, escaped quotes, visible \n).
+            best_effort = _BaseLLM._best_effort_answer_extraction(repaired)
+            if best_effort:
+                logger.warning(
+                    "LLM generate_answer_with_claims: best-effort answer extraction from malformed JSON"
+                )
+                return {"answer": best_effort, "claims": []}
         logger.warning(
             "LLM generate_answer_with_claims: no valid JSON found, using raw response as the answer"
         )
         return {"answer": raw.strip(), "claims": []}
+
+    @staticmethod
+    def _best_effort_answer_extraction(text: str) -> Optional[str]:
+        """Structural (not quote-matching) recovery of the "answer" field's
+        raw text — the fallback of last resort when even the tolerant
+        regex-based recovery above fails. That regex stops at the first
+        unescaped quote it finds, so it can't tell a genuine field-closing
+        quote from one embedded partway through the answer's own text (a
+        quoted term, an apostrophe the model escaped JS/Python-style as
+        ``\\'`` — valid in those languages, not in JSON, so even the
+        recovered fragment's own ``json.loads`` rejects it). Anchoring on the
+        structural ``", "claims"`` boundary instead survives both cases."""
+        match = re.search(r'"answer"\s*:\s*"', text)
+        if not match:
+            return None
+        start = match.end()
+        end_match = re.search(r'"\s*,\s*"claims"', text[start:])
+        end = start + end_match.start() if end_match else len(text)
+        fragment = text[start:end]
+        if not fragment.strip():
+            return None
+        return (
+            fragment.replace('\\"', '"')
+            .replace("\\'", "'")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace("\\\\", "\\")
+            .strip()
+        )
 
     @staticmethod
     def _normalize_claims(raw_claims) -> List[dict]:
@@ -203,7 +264,7 @@ class _BaseLLM(ABC):
                 result.append({"claim": item, "chunks": []})
             elif isinstance(item, dict) and item.get("claim"):
                 indices = [c for c in (item.get("chunks") or []) if isinstance(c, int)]
-                result.append({"claim": item["claim"], "chunks": indices})
+                result.append({"claim": item["claim"], "chunks": indices})  # type: ignore[dict-item]
         return result
 
     def reflect_on_answer(
@@ -238,13 +299,13 @@ class _BaseLLM(ABC):
         system_prompt = (
             "You are a reflection and quality-control pass reviewing a draft answer for a "
             "student exam-prep assistant, before it is shown to the user.\n"
-            "Check the draft against the document excerpts for:\n"
-            "1. Factual consistency — does every claim hold up against the excerpts?\n"
-            "2. Hallucination — remove or hedge anything not grounded in the excerpts\n"
+            "Check the draft against the document content for:\n"
+            "1. Factual consistency — does every claim hold up against the source content?\n"
+            "2. Hallucination — remove or hedge anything not grounded in the source content\n"
             "3. Clarity — plain, well-organized language\n"
             "4. Structure — matches the expected shape. The drafting instructions were: "
             f"{RESPONSE_FORMAT_TEMPLATES[response_format].structure_note}\n"
-            "5. Completeness — uses the relevant excerpt information a student would need\n"
+            "5. Completeness — uses the relevant document information a student would need\n"
             "6. Exam relevance — focused on what's testable, no padding\n\n"
             "Return ONLY a JSON object with this exact shape:\n"
             '{"revised_answer": "...", "materially_changed": true, "should_block": false, '
@@ -253,15 +314,17 @@ class _BaseLLM(ABC):
             "citation-relevant wording — not for pure formatting/style polish. Set "
             "should_block=true only if the draft is fundamentally unusable (e.g. hallucinated "
             'throughout) and cannot be fixed by revision. "claims" traces every factual claim '
-            'in "revised_answer" back to the numbered excerpt(s) it was drawn from — same '
+            'in "revised_answer" back to the numbered source excerpt(s) it was drawn from — same '
             "shape and rules as the draft's own claims; empty array for `chunks` if a claim "
-            "isn't clearly grounded in a specific excerpt."
+            'isn\'t clearly grounded in a specific source excerpt. In "revised_answer", refer to '
+            'the source material as "the document" or "your uploaded material" — never as '
+            '"excerpts" or "chunks", which are internal terms a student wouldn\'t recognize.'
         )
         context = self._format_context(retrieved_chunks)
         user_message = (
             f"{self._format_history(history)}"
             f'Original question: "{query}"\n\n'
-            f"DOCUMENT EXCERPTS:\n{context}\n\n"
+            f"DOCUMENT CONTENT:\n{context}\n\n"
             f"DRAFT ANSWER:\n{draft_answer}\n\n"
             f"VALIDATOR REPORT (citation/confidence signal computed from the draft):\n{validator_summary}\n"
         )
@@ -301,7 +364,7 @@ class _BaseLLM(ABC):
             logger.info(
                 f"LLM reflect_on_answer OK: duration={duration:.2f}s  "
                 f"materially_changed={result['materially_changed']}  should_block={result['should_block']}  "
-                f"issues={len(result['issues_found'])}  claims={len(result['claims'])}"
+                f"issues={len(result['issues_found'])}  claims={len(result['claims'])}"  # type: ignore[arg-type]
             )
             return result
         except (json.JSONDecodeError, Exception) as exc:
@@ -346,7 +409,7 @@ class _BaseLLM(ABC):
         history: Optional[List[ChatMessage]] = None,
     ) -> dict:
         logger.info(
-            f"LLM generate_structured_answer: query={query!r}  intent={intent.value}  "
+            f"LLM generate_structured_answer: query={redact_query_for_log(query)}  intent={intent.value}  "
             f"response_format={response_format.value}  chunks={len(retrieved_chunks)}"
         )
         drafted = self.generate_answer_with_claims(
@@ -428,8 +491,8 @@ class _GeminiLLM(_BaseLLM):
                 ),
             )
             duration = time.time() - start
-            logger.debug(f"Gemini._call OK: duration={duration:.2f}s  response_length={len(response.text)}")
-            return response.text
+            logger.debug(f"Gemini._call OK: duration={duration:.2f}s  response_length={len(response.text)}")  # type: ignore[arg-type]
+            return response.text  # type: ignore[return-value]
         except Exception as e:
             duration = time.time() - start
             logger.error(f"Gemini._call FAILED: duration={duration:.2f}s  error={type(e).__name__}: {e}")
@@ -466,10 +529,10 @@ class _OpenAILLM(_BaseLLM):
             text = response.choices[0].message.content
             usage = response.usage
             logger.debug(
-                f"OpenAI._call OK: duration={duration:.2f}s  response_length={len(text)}  "
+                f"OpenAI._call OK: duration={duration:.2f}s  response_length={len(text)}  "  # type: ignore[arg-type]
                 f"tokens_in={usage.prompt_tokens if usage else '?'}  tokens_out={usage.completion_tokens if usage else '?'}"
             )
-            return text
+            return text  # type: ignore[return-value]
         except Exception as e:
             duration = time.time() - start
             logger.error(f"OpenAI._call FAILED: duration={duration:.2f}s  error={type(e).__name__}: {e}")
@@ -504,7 +567,14 @@ class _AnthropicLLM(_BaseLLM):
             # response.content[0] isn't reliably the text block — current-generation
             # models can emit a ThinkingBlock (or other non-text block) first, so pick
             # out the text block(s) explicitly rather than indexing blindly.
-            text = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+            # Some block types in Anthropic responses may not have a `.text`
+            # attribute; use getattr to safely extract text where present.
+            text_parts = [
+                getattr(block, "text", "")
+                for block in response.content
+                if getattr(block, "type", None) == "text"
+            ]
+            text = "".join(text_parts)
             logger.debug(
                 f"Anthropic._call OK: duration={duration:.2f}s  response_length={len(text)}  "
                 f"tokens_in={response.usage.input_tokens}  tokens_out={response.usage.output_tokens}"
@@ -535,4 +605,6 @@ def ClaudeInterface() -> _BaseLLM:
     cls = _PROVIDERS.get(provider)
     if cls is None:
         raise ValueError(f"Unknown LLM provider '{provider}'. Choose from: {', '.join(_PROVIDERS)}")
-    return cls()
+    # mypy sometimes erroneously flags this instantiation as abstract;
+    # silence that false positive — at runtime `cls` is a concrete subclass.
+    return cls()  # type: ignore[abstract]

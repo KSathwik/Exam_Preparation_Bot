@@ -15,7 +15,7 @@ from typing import Callable, List, Optional, Tuple
 
 from loguru import logger
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from ..context_router import ContextMode, ContextRouter
 from ..conversation_scope import resolve_document_scope
@@ -85,7 +85,7 @@ class OrchestratorAgent:
         on_stage: Optional[OnStage] = None,
     ) -> AnswerWithSources:
         on_stage = on_stage or _noop_on_stage
-        logger.info(f"[ORCHESTRATOR] ===== New query: {query!r} =====")
+        logger.info(f"[ORCHESTRATOR] ===== New query: {redact_query_for_log(query)} =====")
         start = time.time()
 
         try:
@@ -165,7 +165,9 @@ class OrchestratorAgent:
                 # is_global_search_request. document_ids=None tells
                 # AdaptiveRetriever.retrieve to search the full index.
                 resolved_document_ids = None
-                logger.info(f"[ORCHESTRATOR] Explicit global search request detected: {query!r}")
+                logger.info(
+                    f"[ORCHESTRATOR] Explicit global search request detected: {redact_query_for_log(query)}"
+                )
             elif self.db_session_factory is not None:
                 resolved_document_ids = resolve_document_scope(
                     self.db_session_factory, session_id, document_ids
@@ -407,7 +409,7 @@ class OrchestratorAgent:
             )
             logger.exception("[ORCHESTRATOR] Full traceback:")
             result = AnswerWithSources(
-                answer=f"An error occurred: {e}",
+                answer="Something went wrong while preparing your answer. Please try again.",
                 query_intent=QueryType.VAGUE,
                 intent_confidence=0.0,
                 sources=[],

@@ -1,7 +1,9 @@
 """Embedding generation and vector database management."""
 
 import pickle
+import sys
 import threading
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -10,7 +12,7 @@ import numpy as np
 from loguru import logger
 from sentence_transformers import SentenceTransformer
 
-from app.core.config import settings
+from app.core.config import redact_query_for_log, settings
 
 from .models import ChunkMetadata, Document, DocumentChunk, RetrievedChunk
 
@@ -36,6 +38,22 @@ def _min_max_normalize(values: List[float]) -> List[float]:
     return [(v - lo) / (hi - lo) for v in values]
 
 
+def _safe_replace(src: Path, dst: Path) -> None:
+    if sys.platform == "win32" and dst.exists():
+        try:
+            src.replace(dst)
+        except PermissionError:
+            time.sleep(0.05)
+            if dst.exists():
+                try:
+                    dst.unlink()
+                except Exception:
+                    pass
+            src.replace(dst)
+    else:
+        src.replace(dst)
+
+
 class EmbeddingGenerator:
     """Generate embeddings for text chunks."""
 
@@ -48,14 +66,14 @@ class EmbeddingGenerator:
             self.model = SentenceTransformer(settings.embedding_model)
 
         self.model_name = settings.embedding_model
-        if hasattr(self.model, "get_embedding_dimension"):
-            self.embedding_dim = self.model.get_embedding_dimension()
-        else:
-            self.embedding_dim = self.model.get_sentence_embedding_dimension()
+        get_dim = getattr(self.model, "get_embedding_dimension", None) or getattr(
+            self.model, "get_sentence_embedding_dimension", None
+        )
+        self.embedding_dim = get_dim() if get_dim is not None else getattr(settings, "vector_dimension", 384)
 
-    def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:
+    def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:  # type: ignore[assignment]
         batch_size = batch_size or settings.batch_size
-        return self.model.encode(
+        return self.model.encode(  # type: ignore[return-value]
             texts,
             batch_size=batch_size,
             show_progress_bar=False,
@@ -63,13 +81,13 @@ class EmbeddingGenerator:
         )
 
     def encode_single(self, text: str) -> np.ndarray:
-        return self.model.encode(text, normalize_embeddings=True)
+        return self.model.encode(text, normalize_embeddings=True)  # type: ignore[return-value]
 
 
 class FAISSVectorStore:
     """FAISS-based vector store for efficient similarity search."""
 
-    def __init__(self, dimension: int = None, index_path: str = None):
+    def __init__(self, dimension: int = None, index_path: str = None):  # type: ignore[assignment]
         self.dimension = dimension or settings.vector_dimension
         self.index_path = index_path or settings.faiss_index_path
         self.index = None
@@ -117,7 +135,7 @@ class FAISSVectorStore:
             self.chunk_metadata = chunk_metadata
             self.embeddings = embeddings
             logger.info(
-                f"[FAISS] Loaded index: vectors={self.index.ntotal}  metadata={len(self.chunk_metadata)}  path={self.index_path}"
+                f"[FAISS] Loaded index: vectors={self.index.ntotal}  metadata={len(self.chunk_metadata)}  path={self.index_path}"  # type: ignore[attr-defined]
             )
             return True
         except Exception as e:
@@ -149,10 +167,10 @@ class FAISSVectorStore:
             with open(embeddings_tmp, "wb") as f:
                 np.save(f, self.embeddings)
 
-        index_tmp.replace(index_file)
-        metadata_tmp.replace(metadata_file)
+        _safe_replace(index_tmp, index_file)
+        _safe_replace(metadata_tmp, metadata_file)
         if self.embeddings is not None:
-            embeddings_tmp.replace(embeddings_file)
+            _safe_replace(embeddings_tmp, embeddings_file)
         elif embeddings_file.exists():
             embeddings_file.unlink()
 
@@ -162,7 +180,7 @@ class FAISSVectorStore:
         if self.index is None:
             self.create_index()
         embeddings = embeddings.astype(np.float32)
-        self.index.add(embeddings)
+        self.index.add(embeddings)  # type: ignore[attr-defined]
         self.chunk_metadata.extend(metadata_list)
         if self.embeddings is None:
             self.embeddings = embeddings
@@ -371,7 +389,7 @@ class VectorStoreManager:
     def search(
         self,
         query: str,
-        top_k: int = None,
+        top_k: int = None,  # type: ignore[assignment]
         content_types: Optional[List[str]] = None,
         document_ids: Optional[List[str]] = None,
         session_ids: Optional[List[str]] = None,
@@ -390,7 +408,7 @@ class VectorStoreManager:
         top_k = top_k or settings.retrieval_top_k
         content_types = ["document"] if content_types is None else content_types
         logger.debug(
-            f"[SEARCH] query={query!r}  top_k={top_k}  content_types={content_types}  "
+            f"[SEARCH] query={redact_query_for_log(query)}  top_k={top_k}  content_types={content_types}  "
             f"document_ids={document_ids}  session_ids={session_ids}  index_size={self.vector_store.get_size()}"
         )
         query_embedding = self.embedding_gen.encode_single(query)

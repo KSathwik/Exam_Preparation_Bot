@@ -31,17 +31,16 @@ it's unimportant — this is a punch list for the next phase, not a wishlist.
   directly by the orchestrator (no LLM call, so "agent" status wasn't warranted this phase); revisit
   if citation logic grows an LLM-based verification step.
 
-## Multi-tenancy: architecture-ready, not built
+## Multi-tenancy & JWT/OAuth2 Authentication Architecture
 
-Phase 1 made the schema forward-compatible without building the feature:
-- `ChatSession.user_id` and `ConversationMemory.user_id` are nullable columns, added specifically so
-  real multi-user auth won't require another migration.
-- Today's actual auth model is unchanged: a single shared `APP_API_KEY` via `X-API-Key` (or
-  `?api_key=` for WebSocket) — see `app/core/security.py`.
+Phase 1 established forward-compatible schema and API key foundations:
+- `ChatSession.user_id` and `ConversationMemory.user_id` are nullable columns, added specifically so real multi-tenant auth won't require DB schema migrations.
+- Today's REST/WebSocket security uses `X-API-Key` headers and browser-scoped `device_id` identifiers in local storage for session isolation.
 
-Phase 2 work: real login/signup, per-user API keys or JWT/session auth, and threading a real
-`user_id`/`session_id` through `get_bot()` (today's `ExamPrepBot` singleton has one shared
-`chat_history` — there's no per-user isolation to remove, since there's no per-user concept yet).
+**Phase 2 Multi-Tenant Migration Blueprint**:
+1. **User Identity & JWT/OAuth2 Provider**: Integrate Auth0 / Keycloak / NextAuth or FastAPI OAuth2 (`OAuth2PasswordBearer` + JWT tokens).
+2. **Bearer Token Middleware**: Replace single shared `APP_API_KEY` requirement on protected routes with `Authorization: Bearer <jwt_token>` validation (`app/core/security.py`).
+3. **User Isolation**: Automatically bind document uploads, vector store namespaces, and conversation history directly to the authenticated `user_id` extracted from JWT claims.
 
 ## Progress tracking
 

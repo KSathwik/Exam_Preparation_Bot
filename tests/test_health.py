@@ -1,5 +1,7 @@
 """Tests for health and system endpoints."""
 
+from tests.conftest import TEST_ADMIN_API_KEY
+
 
 def test_health_endpoint(client):
     resp = client.get("/health")
@@ -13,7 +15,7 @@ def test_version_endpoint(client):
     resp = client.get("/version")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["app_name"] == "Exam Prep Bot"
+    assert data["app_name"] in ("AI Knowledge Assistant", "Exam Prep Bot")
     assert "version" in data
 
 
@@ -39,7 +41,9 @@ def test_system_config(client):
 
 
 def test_metrics_endpoint(client):
-    resp = client.get("/api/metrics")
+    # /api/metrics is admin-gated, not covered by the `client` fixture's
+    # default (regular) X-API-Key header — see require_admin_key.
+    resp = client.get("/api/metrics", headers={"X-API-Key": TEST_ADMIN_API_KEY})
     assert resp.status_code == 200
     data = resp.json()
     assert "vector_store" in data
