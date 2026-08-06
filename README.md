@@ -1,6 +1,6 @@
 # AI Knowledge Assistant
 
-A production-ready **AI Knowledge Assistant** built on **Hybrid RAG**, **Context-Aware Generation (CAG)**, and **Multi-Agent Orchestration**. Upload custom documents (PDF/DOCX) and ask questions in a ChatGPT/Claude-style interface, grounded entirely in your uploaded context — every answer carries claim-level citations, confidence scoring, hallucination-risk assessment, and active reflection quality control.
+The **AI Knowledge Assistant** built on **Hybrid RAG**, **Context-Aware Generation (CAG)**, and **Multi-Agent Orchestration**. Upload custom documents (PDF/DOCX) and ask questions in a ChatGPT/Claude-style interface, grounded entirely in your uploaded context — every answer carries claim-level citations, confidence scoring, hallucination-risk assessment, and active reflection quality control.
 
 > **Demonstration Application**: Includes a built-in **Exam Preparation & Study Assistant** domain preset out-of-the-box, demonstrating intent-driven revision tools (flashcards, MCQs, mark-based exam answers, comparison tables, and summary notes).
 
