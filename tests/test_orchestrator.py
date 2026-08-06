@@ -16,11 +16,11 @@ from app.services.agents.reflection_agent import ReflectionAgent
 from app.services.agents.retrieval_agent import RetrievalAgent
 from app.services.models import (
     AnswerWithSources,
+    ChatMessage,
     ChunkMetadata,
     IntentClassificationResult,
     QueryType,
     RetrievedChunk,
-    ChatMessage,
 )
 from app.services.response_formats import ResponseFormat
 

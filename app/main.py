@@ -1,5 +1,5 @@
 """
-Exam Prep Bot — FastAPI Backend
+AI Knowledge Assistant — FastAPI Backend
 Unified application entry point.
 """
 
@@ -76,7 +76,7 @@ def _redact_dsn(dsn: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 60)
-    logger.info("Starting Exam Prep Bot...")
+    logger.info("Starting AI Knowledge Assistant...")
     logger.info(f"LLM Provider : {settings.llm_provider}")
     logger.info(f"Model Name   : {settings.model_name or '(provider default)'}")
     logger.info(f"Embedding    : {settings.embedding_model}")
@@ -85,21 +85,27 @@ async def lifespan(app: FastAPI):
     logger.info(f"Debug Mode   : {settings.debug_mode}")
     logger.info("=" * 60)
 
+    import asyncio
+
     init_db()
 
     from app.core.dependencies import get_bot
 
-    get_bot()
-    logger.info("Bot initialized successfully — ready to serve requests")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(asyncio.to_thread(get_bot))
+    except RuntimeError:
+        pass
+    logger.info("Application initialized successfully — server ready to serve requests")
 
     yield
 
-    logger.info("Shutting down Exam Prep Bot...")
+    logger.info("Shutting down AI Knowledge Assistant...")
 
 
 app = FastAPI(
     title=settings.app_name,
-    description="Intelligent exam preparation chatbot powered by Claude + RAG",
+    description="Production-ready AI Knowledge Assistant powered by Hybrid RAG + CAG with Multi-Agent Orchestration",
     version=settings.app_version,
     lifespan=lifespan,
 )
@@ -160,7 +166,7 @@ app.include_router(conversations.router, prefix="/api/conversations", tags=["Con
 async def root():
     html_path = Path("frontend/index.html")
     if not html_path.exists():
-        return {"message": "Exam Prep Bot API is running. Visit /docs for Swagger UI."}
+        return {"message": "AI Knowledge Assistant API is running. Visit /docs for Swagger UI."}
 
     if not (settings.expose_api_key_to_frontend and ACTIVE_API_KEY):
         return FileResponse(str(html_path))

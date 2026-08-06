@@ -24,35 +24,44 @@ wheels/
 venv/
 ENV/
 env/
-.venv
+.venv/
 
-# IDE
+# IDE & Editor & AI Agent Caches
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+.claude/
+.gemini/
+.agents/
 
-# Testing
+# Testing & Type Checking
 .pytest_cache/
+.mypy_cache/
 .coverage
 htmlcov/
 .tox/
+mypy_errors.txt
 
 # Logs
 logs/
 *.log
 
-# Data
+# Data & Vector Storage
 uploads/
 cache/
-data/faiss_index/
+data/
+*.faiss
+*.pkl
+*.npy
 
-# Ad-hoc manual test outputs
+# Ad-hoc manual test outputs & databases
 /*_test_answer.txt
-data/embeddings/
 *.db
+*.sqlite
+*.sqlite3
 
 # Environment
 .env
@@ -69,7 +78,7 @@ build/
 .DS_Store
 Thumbs.db
 
-# Misc
+# Misc & Temporary
 *.bak
 *.tmp
 .temp/

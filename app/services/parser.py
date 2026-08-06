@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple, Any
+from typing import Any, List, Optional, Tuple
 
 import pdfplumber
 from docx import Document as DocxDocument

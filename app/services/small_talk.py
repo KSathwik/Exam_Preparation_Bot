@@ -26,14 +26,14 @@ _THANKS = {"thanks", "thank you", "thx", "ty", "thanks a lot", "thank you so muc
 _FAREWELLS = {"bye", "goodbye", "see ya", "see you", "cya"}
 
 _GREETING_REPLY = (
-    "Hello! I'm your exam prep assistant. Upload your study materials and ask me anything "
-    "about them — definitions, explanations, comparisons, or a walkthrough of a process."
+    "Hello! I'm your AI Knowledge Assistant. Upload your documents and ask me anything "
+    "about them — definitions, explanations, comparisons, or a detailed walkthrough."
 )
 _HOW_ARE_YOU_REPLY = (
-    "I'm doing well, thanks for asking! Ready whenever you are — what would you like to study?"
+    "I'm doing well, thanks for asking! Ready whenever you are — what would you like to explore?"
 )
 _THANKS_REPLY = "You're welcome! Let me know if you have more questions."
-_FAREWELL_REPLY = "Goodbye! Good luck with your studies."
+_FAREWELL_REPLY = "Goodbye! Have a great day."
 
 
 def match_small_talk(query: str) -> Optional[str]:

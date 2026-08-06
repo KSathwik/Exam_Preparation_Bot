@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 from app.models.db_models import Base, ChatMessageRecord, ChatSession, ConversationMemory
 from app.services.agents.memory_agent import MemoryAgent
-from app.services.models import QueryType, ChatMessage
+from app.services.models import ChatMessage, QueryType
 
 
 @pytest.fixture()

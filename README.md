@@ -1,23 +1,22 @@
-# Exam Prep Bot
+# AI Knowledge Assistant
 
-An AI study assistant for exam prep: upload your course material (PDF/DOCX) and ask questions in a
-ChatGPT/Claude-style chat interface, grounded entirely in what you uploaded — every answer carries
-source citations, a confidence score, and a hallucination-risk assessment, and nothing is answered
-from the model's general knowledge alone.
+A production-ready **AI Knowledge Assistant** built on **Hybrid RAG**, **Context-Aware Generation (CAG)**, and **Multi-Agent Orchestration**. Upload custom documents (PDF/DOCX) and ask questions in a ChatGPT/Claude-style interface, grounded entirely in your uploaded context — every answer carries claim-level citations, confidence scoring, hallucination-risk assessment, and active reflection quality control.
 
-**Chat experience**
+> **Demonstration Application**: Includes a built-in **Exam Preparation & Study Assistant** domain preset out-of-the-box, demonstrating intent-driven revision tools (flashcards, MCQs, mark-based exam answers, comparison tables, and summary notes).
+
+**Core Experience**
 - Persistent, per-browser conversation history — auto-titled, searchable, renameable, deletable
 - Streaming answers with live progress ("Searching your documents…" → "Drafting an answer…" →
   "Reviewing the draft…") instead of a silent multi-second wait
 - **Intent-driven, not prompt-driven**: a deterministic format classifier detects what shape of
-  answer you actually want — key points, a summary, revision notes, a comparison table, flashcards,
-  MCQs, one-line/two/five/ten-mark exam answers, and more — from ordinary phrasing ("in 5 points",
-  "TL;DR", "one line answer", "compare X and Y"), no format menu required
+  answer you actually want — key points, summaries, revision notes, comparison tables, flashcards,
+  MCQs, one-line/two/five/ten-mark answers, and more — from ordinary phrasing ("in 5 points",
+  "TL;DR", "one line answer", "compare X and Y"), no manual format menu required
 - Markdown, syntax-highlighted code, tables, and LaTeX math rendering in every response
 - Copy / regenerate / edit / stop on every message, plus contextual "Summarize" / "Explain simpler" /
   "Explain in detail" follow-up chips under the latest answer
 - **AI Hub** sidebar section (ChatGPT/Claude/Gemini/Perplexity + Wikipedia) and a per-message
-  "Open in" action — continue researching a question in another AI or a trusted knowledge source in
+  "Open in" action — continue researching a question in another AI or trusted knowledge source in
   one click, opened in a new tab with the question carried over wherever the provider supports it
 - Retrieval scoped to the document(s) uploaded in the current conversation first, so answers stay
   grounded in what you just asked about instead of blending in unrelated older uploads

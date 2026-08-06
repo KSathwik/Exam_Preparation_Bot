@@ -61,7 +61,7 @@ class _BaseLLM(ABC):
         """
         template = RESPONSE_FORMAT_TEMPLATES[response_format]
         system_prompt = (
-            "You are a helpful study assistant for a student preparing for exams.\n"
+            "You are an AI Knowledge Assistant grounded entirely in the provided document context.\n"
             f"{template.prompt_instructions}\n\n"
             "Respond with ONLY a JSON object of this exact shape:\n"
             '{"answer": "<your answer as a plain string>", '

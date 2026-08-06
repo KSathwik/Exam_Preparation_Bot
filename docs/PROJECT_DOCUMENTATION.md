@@ -1,4 +1,4 @@
-# Exam Prep Bot — Complete Project Documentation
+# AI Knowledge Assistant — Complete Project Documentation
 
 A comprehensive reference covering what the project is, the full technology stack, every algorithm
 and technique used, the system architecture, database schema, API surface, security model, testing
@@ -10,16 +10,11 @@ for coding-agent-facing conventions see `CLAUDE.md`; for what's intentionally de
 
 ## 1. What This Project Is
 
-**Exam Prep Bot** is a Retrieval-Augmented Generation (RAG) chatbot that lets a student upload course
-material (PDF/DOCX) and ask natural-language questions about it. Instead of relying purely on an
-LLM's parametric knowledge, every answer is grounded in the student's own uploaded documents, with
-citations back to the exact page/section the claim came from, plus a confidence score and a
-hallucination-risk rating.
+**AI Knowledge Assistant** is a production-ready Retrieval-Augmented Generation (RAG) platform powered by **Hybrid RAG**, **Context-Aware Generation (CAG)**, and **Multi-Agent Orchestration**. It enables users to upload document collections (PDF/DOCX) and ask natural-language questions about them. Instead of relying purely on an LLM's parametric knowledge, every answer is grounded in the uploaded document context, with citations back to the exact page/section the claim came from, plus a confidence score and a hallucination-risk rating.
 
-Beyond a single-shot Q&A loop, it runs a small **multi-agent pipeline**: a deterministic orchestrator
-coordinates intent classification, hybrid retrieval, LLM answer drafting, a mandatory second-pass
-**self-reflection/quality-control** LLM call, citation/confidence scoring, and (optionally) persistent
-conversation memory with semantic recall across sessions.
+> **Demonstration Preset**: The platform includes an out-of-the-box **Exam Preparation & Study Assistant** preset demonstrating intent-driven revision tools (flashcards, MCQs, mark-based exam answers, comparison tables, and summary notes).
+
+Beyond a single-shot Q&A loop, it runs a **multi-agent pipeline**: a deterministic orchestrator coordinates intent classification, hybrid RAG / CAG routing, LLM answer drafting, a mandatory second-pass **self-reflection/quality-control** LLM call, citation/confidence scoring, and persistent conversation memory with semantic recall across sessions.
 
 ---
 

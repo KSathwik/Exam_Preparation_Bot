@@ -48,12 +48,10 @@ class QueryRequest(BaseModel):
     document_id: Optional[str] = None
     session_id: Optional[str] = None
     device_id: Optional[str] = None
-    # Scopes retrieval to just these documents first, falling back to the
-    # full index if that misses — see AdaptiveRetriever.retrieve. Lets the
-    # frontend keep a conversation grounded in the document(s) actually
-    # uploaded there instead of searching every document ever uploaded.
     document_ids: Optional[List[str]] = None
+    domain_preset: Optional[str] = None
     top_k: Optional[int] = None
+    temperature: Optional[float] = None
 
     @field_validator("query")
     @classmethod

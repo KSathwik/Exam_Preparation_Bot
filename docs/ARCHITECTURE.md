@@ -11,7 +11,7 @@ flowchart TB
     Client[Browser / API client] -->|REST /api/ask, /api/query, /api/batch| API[FastAPI routers<br/>app/api/*]
     Client -->|WebSocket /api/ws| API
     API --> Deps[app.core.dependencies<br/>DI singletons]
-    Deps --> Bot[ExamPrepBot<br/>app/services/pipeline.py]
+    Deps --> Bot[KnowledgeAssistantPipeline<br/>app/services/pipeline.py]
     Bot --> Orchestrator[OrchestratorAgent]
     Orchestrator --> IntentC[IntentClassifier<br/>what it's about]
     Orchestrator --> FormatC[FormatClassifier<br/>how it should look]

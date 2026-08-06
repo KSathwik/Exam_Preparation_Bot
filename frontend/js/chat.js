@@ -2,7 +2,7 @@
    (the composer disables itself while streaming), so a single closure-level
    "current stream" is enough — no need to key state by message id. */
 
-import { state, setSessionId, newConversationId, setDocumentIds } from "./state.js";
+import { state, setSessionId, newConversationId, setDocumentIds, setDomainPreset } from "./state.js";
 import { buildWsUrl, listDocuments } from "./api.js";
 import { renderMarkdown, escapeText, renderMathIn } from "./markdown.js";
 import { buildResearchControl } from "./continueResearch.js";
@@ -26,6 +26,31 @@ export function initChat() {
     pinned = true;
     scrollToBottom();
     jumpBtn.hidden = true;
+  });
+
+  messagesBox.addEventListener("click", (e) => {
+    const chip = e.target.closest(".goto-upload-chip");
+    if (chip) {
+      const fileInput = document.getElementById("fileInput");
+      if (fileInput) fileInput.click();
+    }
+  });
+
+  initPresetSelector();
+}
+
+function initPresetSelector() {
+  const bar = document.getElementById("presetSelectorBar");
+  if (!bar) return;
+  const pills = bar.querySelectorAll(".preset-pill");
+  pills.forEach((pill) => {
+    const isSelected = pill.dataset.preset === (state.domainPreset || "general");
+    pill.classList.toggle("active", isSelected);
+    pill.addEventListener("click", () => {
+      pills.forEach((p) => p.classList.remove("active"));
+      pill.classList.add("active");
+      setDomainPreset(pill.dataset.preset);
+    });
   });
 }
 
@@ -61,10 +86,10 @@ export function clearMessages() {
 /* ── Empty state ───────────────────────────────────────────────────── */
 
 const EXAMPLE_PROMPTS = [
-  "Summarize this document in a few key points",
-  "What are the most important definitions I should know?",
+  "Summarize key concepts & definitions",
+  "Extract main insights & technical details",
   "Walk me through this process step by step",
-  "Quiz me on the main ideas",
+  "Quiz me or generate practice questions",
 ];
 
 export function showEmptyStateIfNeeded() {
@@ -74,7 +99,7 @@ export function showEmptyStateIfNeeded() {
   wrap.innerHTML =
     '<div class="empty-state-icon">✦</div>' +
     "<h2>Ready when you are</h2>" +
-    "<p>Upload your study materials, then ask anything about them.</p>" +
+    "<p>Upload your knowledge base or documents, then ask anything about them.</p>" +
     '<div class="empty-state-chips">' +
     EXAMPLE_PROMPTS.map((p) => `<button type="button" class="suggestion-chip">${escapeText(p)}</button>`).join("") +
     "</div>";
@@ -342,10 +367,7 @@ async function showNoMatchSuggestions(suggestionsEl) {
   if (byName.size === 0) {
     suggestionsEl.innerHTML =
       "<p>No documents uploaded yet.</p>" +
-      '<button type="button" class="suggestion-chip" id="gotoUploadBtn">Upload a document to get started</button>';
-    document.getElementById("gotoUploadBtn").addEventListener("click", () => {
-      document.getElementById("fileInput").click();
-    });
+      '<button type="button" class="suggestion-chip goto-upload-chip">Upload a document to get started</button>';
     return;
   }
 
@@ -550,6 +572,9 @@ export function sendQuery(text, opts) {
         session_id: state.sessionId,
         device_id: state.deviceId,
         document_ids: state.documentIds,
+        domain_preset: state.domainPreset,
+        top_k: state.topK,
+        temperature: state.temperature,
       })
     );
   });

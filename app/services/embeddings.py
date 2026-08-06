@@ -1,7 +1,9 @@
 """Embedding generation and vector database management."""
 
 import pickle
+import sys
 import threading
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -36,6 +38,22 @@ def _min_max_normalize(values: List[float]) -> List[float]:
     return [(v - lo) / (hi - lo) for v in values]
 
 
+def _safe_replace(src: Path, dst: Path) -> None:
+    if sys.platform == "win32" and dst.exists():
+        try:
+            src.replace(dst)
+        except PermissionError:
+            time.sleep(0.05)
+            if dst.exists():
+                try:
+                    dst.unlink()
+                except Exception:
+                    pass
+            src.replace(dst)
+    else:
+        src.replace(dst)
+
+
 class EmbeddingGenerator:
     """Generate embeddings for text chunks."""
 
@@ -48,10 +66,10 @@ class EmbeddingGenerator:
             self.model = SentenceTransformer(settings.embedding_model)
 
         self.model_name = settings.embedding_model
-        if hasattr(self.model, "get_embedding_dimension"):
-            self.embedding_dim = self.model.get_embedding_dimension()
-        else:
-            self.embedding_dim = self.model.get_sentence_embedding_dimension()
+        get_dim = getattr(self.model, "get_embedding_dimension", None) or getattr(
+            self.model, "get_sentence_embedding_dimension", None
+        )
+        self.embedding_dim = get_dim() if get_dim is not None else getattr(settings, "vector_dimension", 384)
 
     def encode(self, texts: List[str], batch_size: int = None) -> np.ndarray:  # type: ignore[assignment]
         batch_size = batch_size or settings.batch_size
@@ -149,10 +167,10 @@ class FAISSVectorStore:
             with open(embeddings_tmp, "wb") as f:
                 np.save(f, self.embeddings)
 
-        index_tmp.replace(index_file)
-        metadata_tmp.replace(metadata_file)
+        _safe_replace(index_tmp, index_file)
+        _safe_replace(metadata_tmp, metadata_file)
         if self.embeddings is not None:
-            embeddings_tmp.replace(embeddings_file)
+            _safe_replace(embeddings_tmp, embeddings_file)
         elif embeddings_file.exists():
             embeddings_file.unlink()
 

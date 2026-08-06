@@ -799,13 +799,20 @@ button:focus-visible,
 /* ── Settings modal ────────────────────────────────────────────────── */
 
 dialog#settingsModal{
-  width:min(480px,92vw);
+  position:fixed !important;
+  top:50% !important;
+  left:50% !important;
+  transform:translate(-50%,-50%) !important;
+  margin:0 !important;
+  width:min(480px,92vw) !important;
+  max-height:min(85vh,650px) !important;
   border:1px solid var(--color-border);
   border-radius:var(--radius-lg);
   padding:0;
   background:var(--color-surface);
   color:var(--color-text);
   box-shadow:var(--shadow-lg);
+  overflow-y:auto;
 }
 dialog#settingsModal::backdrop{background:rgba(10,11,20,.45)}
 .settings-header{
@@ -831,13 +838,44 @@ dialog#settingsModal::backdrop{background:rgba(10,11,20,.45)}
 .segmented-control button:last-child{border-right:none}
 .segmented-control button.active{background:var(--color-primary-soft);color:var(--color-primary)}
 
+.setting-item{display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3);width:100%}
+.setting-label{font-size:13px;color:var(--color-text-muted);display:flex;justify-content:space-between;align-items:center}
+.setting-label strong{color:var(--color-primary);font-weight:700}
+.setting-slider{
+  width:100%;accent-color:var(--color-primary);cursor:pointer;
+  height:6px;border-radius:var(--radius-pill);background:var(--color-surface-alt);
+}
+
+/* ── Domain Preset Selector Bar ──────────────────────────────────── */
+
+.preset-selector-bar{
+  display:flex;align-items:center;gap:var(--space-2);
+  max-width:var(--chat-max-width);width:100%;margin:0 auto var(--space-2);
+  padding:0 var(--space-2);overflow-x:auto;scrollbar-width:none;
+}
+.preset-selector-bar::-webkit-scrollbar{display:none}
+.preset-label{font-size:12px;font-weight:700;color:var(--color-text-faint);text-transform:uppercase;letter-spacing:.04em;margin-right:var(--space-1);flex-shrink:0}
+.preset-pill{
+  padding:5px 12px;border-radius:var(--radius-pill);
+  border:1px solid var(--color-border);background:var(--color-surface);
+  color:var(--color-text-muted);font-size:12.5px;font-weight:600;font-family:inherit;
+  cursor:pointer;white-space:nowrap;flex-shrink:0;
+  transition:all var(--transition-fast);
+}
+.preset-pill:hover{background:var(--color-surface-alt);color:var(--color-text);border-color:var(--color-primary-soft)}
+.preset-pill.active{
+  background:var(--gradient-primary-soft);color:var(--color-primary);
+  border-color:var(--color-primary);box-shadow:var(--shadow-sm);
+}
+
 .settings-stats{font-size:13px;color:var(--color-text-muted);line-height:1.9}
 .settings-stats strong{color:var(--color-text)}
 
 .dev-options{margin-top:var(--space-3)}
 .dev-options summary{cursor:pointer;font-size:12.5px;color:var(--color-text-faint);list-style:none}
 .dev-options summary::-webkit-details-marker{display:none}
-.dev-options-content{margin-top:var(--space-3);display:flex;gap:var(--space-2)}
+.dev-options-content{margin-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-3)}
+.dev-api-key-row{display:flex;gap:var(--space-2);width:100%}
 .dev-options .settings-stats{margin-top:var(--space-3)}
 .dev-options-content input{
   flex:1;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);

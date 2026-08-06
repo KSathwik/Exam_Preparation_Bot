@@ -118,7 +118,7 @@ async def classify_intent(query: str):
 @limit_expensive()
 async def batch_queries(request: Request, payload: BatchQueryRequest):
     bot = get_bot()
-    results = []
+    results: list[dict] = []
     for q in payload.queries:
         try:
             a = await run_in_threadpool(bot.answer_question, q)
@@ -182,6 +182,9 @@ async def websocket_query(websocket: WebSocket):
             session_id = message.get("session_id")
             device_id = message.get("device_id")
             document_ids = message.get("document_ids")
+            domain_preset = message.get("domain_preset")
+            top_k = message.get("top_k")
+            temperature = message.get("temperature")
             if not query or not query.strip():
                 await websocket.send_json({"type": "error", "message": "Query is required"})
                 continue
@@ -239,7 +242,7 @@ async def websocket_query(websocket: WebSocket):
                 # per-provider token stream to relay (see llm_interface.py),
                 # so this pacing is what makes an already-fully-generated
                 # string feel like it's streaming.
-                async def _send_chunks(text: str, chunk_size: int = 40, delay_seconds: float = 0.02) -> None:
+                async def _send_chunks(text: str, chunk_size: int = 4, delay_seconds: float = 0.01) -> None:
                     for i in range(0, len(text), chunk_size):
                         await websocket.send_json({"type": "chunk", "text": text[i : i + chunk_size]})
                         await asyncio.sleep(delay_seconds)
