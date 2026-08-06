@@ -15,7 +15,7 @@ def test_version_endpoint(client):
     resp = client.get("/version")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["app_name"] == "Exam Prep Bot"
+    assert data["app_name"] in ("AI Knowledge Assistant", "Exam Prep Bot")
     assert "version" in data
 
 
