@@ -159,11 +159,10 @@ follow-up plan.
 
 **Multi-LLM provider support** (`llm_interface.py`): `ClaudeInterface()` is a *factory function*, not a
 class — despite the name (kept for backward compatibility), it dispatches on `settings.llm_provider`
-(`gemini`/`openai`/`anthropic`) to return a `_GeminiLLM`/`_OpenAILLM`/`_AnthropicLLM`, all subclassing
-`_BaseLLM`. Shared prompt-building, claim extraction, and structured-answer logic lives in `_BaseLLM`;
-each subclass only implements `_call()` for its SDK. Per-provider default model names live in
-`_DEFAULT_MODELS`, overridable via `MODEL_NAME`. Only the API key matching the active provider is
-required at runtime. `_GeminiLLM` uses the `google-genai` SDK (`google.genai.Client(...).models.generate_content`)
+(`gemini`/`openai`/`anthropic`/`ollama`) to return a `_GeminiLLM`/`_OpenAILLM`/`_AnthropicLLM`/`_OllamaLLM`, all subclassing
+`_BaseLLM`. Shared prompt-building, claim extraction, reflection quality control, and structured-answer logic lives in `_BaseLLM`;
+each subclass implements `_call()` (and optional `_stream_call()`) for its SDK/client. Per-provider default model names live in
+`_DEFAULT_MODELS`, overridable via `MODEL_NAME` or `OLLAMA_MODEL`. `_OllamaLLM` communicates with local Ollama HTTP API (`http://localhost:11434`) using `httpx`, supporting custom local models (llama3.2, llama3.1, etc.), retries, timeouts, keep-alive, streaming, and health checks (`check_health()`). `_GeminiLLM` uses the `google-genai` SDK (`google.genai.Client(...).models.generate_content`)
 — the older `google-generativeai` package it replaces is end-of-life; don't reintroduce it.
 `ExamPrepBot.__init__` accepts an optional `llm=` override (same DI pattern as
 `vector_store_manager`/`intent_classifier`) specifically so tests can inject a mock LLM instead of

@@ -14,6 +14,7 @@ from app.services.llm_interface import (
     ClaudeInterface,
     _AnthropicLLM,
     _GeminiLLM,
+    _OllamaLLM,
     _OpenAILLM,
 )
 from app.services.models import ChatMessage, ChunkMetadata, QueryType, RetrievedChunk
@@ -31,6 +32,14 @@ def _restore_provider(monkeypatch):
 def _chunk(content="Mitochondria are the powerhouse of the cell.", page=4):
     meta = ChunkMetadata(page_number=page, chunk_index=0, total_chunks=1, file_name="bio.pdf")
     return RetrievedChunk(content=content, metadata=meta, relevance_score=0.9, rank=1)
+
+
+def test_factory_returns_ollama(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "llama3.2")
+    llm = ClaudeInterface()
+    assert isinstance(llm, _OllamaLLM)
+    assert llm.model == "llama3.2"
 
 
 def test_factory_returns_anthropic(monkeypatch):
@@ -392,3 +401,82 @@ def test_summarize_conversation_returns_empty_on_failure(monkeypatch):
 
     turns = [ChatMessage(role="user", content="hi", timestamp="2024-01-01T00:00:00")]
     assert llm.summarize_conversation(turns) == ""
+
+
+def test_ollama_call_uses_client(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "llama3.2")
+    llm = ClaudeInterface()
+    assert isinstance(llm, _OllamaLLM)
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {"message": {"content": "Ollama answer text"}, "eval_count": 15}
+    fake_resp.raise_for_status = MagicMock()
+    llm._client.post = MagicMock(return_value=fake_resp)  # type: ignore[method-assign]
+
+    res = llm._call("sys prompt", "user message")
+    assert res == "Ollama answer text"
+    llm._client.post.assert_called_once()
+
+
+def test_ollama_call_handles_404_model_not_found(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "invalid-model")
+    llm = ClaudeInterface()
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 404
+    llm._client.post = MagicMock(return_value=fake_resp)  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="not found at"):
+        llm._call("sys", "user")
+
+
+def test_ollama_check_health_healthy(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "llama3.2")
+    llm = ClaudeInterface()
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {"models": [{"name": "llama3.2:latest"}, {"name": "mistral"}]}
+    llm._client.get = MagicMock(return_value=fake_resp)  # type: ignore[method-assign]
+
+    health = llm.check_health()
+    assert health["status"] == "healthy"
+    assert health["server_connected"] is True
+    assert health["model_available"] is True
+
+
+def test_ollama_check_health_unhealthy_connection_error(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    llm = ClaudeInterface()
+    llm._client.get = MagicMock(side_effect=httpx.ConnectError("Connection refused"))  # type: ignore[method-assign]
+
+    health = llm.check_health()
+    assert health["status"] == "unhealthy"
+    assert health["server_connected"] is False
+    assert "Could not connect to Ollama server" in health["error"]
+
+
+def test_ollama_streaming(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    llm = ClaudeInterface()
+    assert isinstance(llm, _OllamaLLM)
+
+    fake_context = MagicMock()
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.iter_lines.return_value = [
+        '{"message": {"content": "Hello "}}',
+        '{"message": {"content": "world!"}}',
+    ]
+    fake_context.__enter__.return_value = fake_resp
+    llm._client.stream = MagicMock(return_value=fake_context)  # type: ignore[method-assign]
+
+    chunks = list(llm._stream_call("sys", "user"))
+    assert chunks == ["Hello ", "world!"]

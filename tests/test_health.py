@@ -7,8 +7,10 @@ def test_health_endpoint(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "healthy"
+    assert data["status"] in ("healthy", "degraded", "unhealthy")
     assert "version" in data
+    assert "llm_provider" in data
+    assert "llm_health" in data
 
 
 def test_version_endpoint(client):

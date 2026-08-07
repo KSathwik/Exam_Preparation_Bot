@@ -92,6 +92,19 @@ async def lifespan(app: FastAPI):
     from app.core.dependencies import get_bot
 
     try:
+        bot = get_bot()
+        if hasattr(bot.llm, "check_health"):
+            health = bot.llm.check_health()
+            if health.get("status") == "healthy":
+                logger.info(
+                    f"LLM Provider Health: Healthy ({health.get('provider')} / {health.get('model')})"
+                )
+            else:
+                logger.warning(f"LLM Provider Health: {health.get('status').upper()} — {health.get('error')}")
+    except Exception as e:
+        logger.warning(f"Could not perform startup LLM provider health check: {e}")
+
+    try:
         loop = asyncio.get_running_loop()
         loop.create_task(asyncio.to_thread(get_bot))
     except RuntimeError:
