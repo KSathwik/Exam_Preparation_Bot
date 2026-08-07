@@ -42,6 +42,18 @@ Phase 1 established forward-compatible schema and API key foundations:
 2. **Bearer Token Middleware**: Replace single shared `APP_API_KEY` requirement on protected routes with `Authorization: Bearer <jwt_token>` validation (`app/core/security.py`).
 3. **User Isolation**: Automatically bind document uploads, vector store namespaces, and conversation history directly to the authenticated `user_id` extracted from JWT claims.
 
+## Enterprise Agentic Evolution Matrix
+
+| Capability Area | Current State (Phase 1) | Phase 2 / Enterprise Target |
+| :--- | :--- | :--- |
+| **Retrieval Strategy** | Rule-based ContextRouter (RAG vs CAG) | Adaptive multi-modal GraphRAG + hybrid search with automated fallback |
+| **Tool Execution** | In-code Python modules | MCP-standardized tool discovery & sandboxed code interpreter |
+
+## Tool Orchestration & MCP Integration
+
+- **MCP-Standardized Tool Discovery**: Migrate agent tool invocations to Model Context Protocol (MCP) standards, enabling sub-agents to dynamically discover, inspect, and consume external enterprise services, database tools, and microservice APIs using standardized schemas.
+- **Sandboxed Code Interpreter**: Integrate an isolated execution environment (e.g., Docker containerized Python execution or E2B sandbox) allowing sub-agents to execute code safely for mathematical evaluation, grading algorithms, and dynamic visual charting.
+
 ## Progress tracking
 
 Depends on the Quiz/Flashcard agents existing first (there's nothing to track progress *on* yet
@@ -49,6 +61,8 @@ otherwise) — e.g. mastery-per-topic derived from quiz results, spaced-repetiti
 and a dashboard surfacing it. Revisit once those agents land.
 
 ## Retrieval/embedding follow-ups (reassess, don't build speculatively)
+
+- **Adaptive multi-modal GraphRAG + hybrid search with automated fallback**: Evolve `ContextRouter` from deterministic thresholding into an adaptive multi-modal GraphRAG pipeline that constructs concept-dependency graphs across study documents, combines dense/sparse vector search with graph traversal, and provides automated fallback to live web search or semantic memory when document retrieval confidence is low.
 
 - **Provider-level prompt/context caching** — Hybrid RAG + CAG (`context_router.py`) already gives the
   drafting LLM a whole small document's context instead of ranked chunks; the next, designed-but-not-

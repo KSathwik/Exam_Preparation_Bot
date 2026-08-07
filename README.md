@@ -38,7 +38,7 @@ A production-ready **AI Knowledge Assistant** built on **Hybrid RAG**, **Context
 - Per-claim citation extraction, confidence scoring, and hallucination-risk assessment (no LLM call),
   plus a deterministic pre-reflection shortcut that skips the second LLM call outright when a draft
   is already unambiguously ungrounded
-- Multi-provider LLM support — Anthropic Claude, OpenAI, or Google Gemini, switchable via one setting
+- Multi-provider LLM support — Anthropic Claude, OpenAI, Google Gemini, or local Ollama (Llama 3.2 / Llama 3.1 / custom local models), switchable via configuration
 - FastAPI backend with async/await and WebSocket streaming
 - SQLAlchemy + Alembic migrations for documents, conversations, and semantic conversation memory
 - API-key authentication + rate limiting on sensitive/expensive endpoints
@@ -182,7 +182,13 @@ full list with defaults. Notable groups:
 
 | Variable | Purpose |
 |---|---|
-| `LLM_PROVIDER`, `*_API_KEY` | Which LLM backend to use, and its key (only the matching key is required) |
+| `LLM_PROVIDER` | LLM backend to use: `gemini`, `openai`, `anthropic`, or `ollama` |
+| `*_API_KEY` | API keys (required for cloud providers `gemini`, `openai`, `anthropic`) |
+| `OLLAMA_BASE_URL` | Base URL for Ollama local server (default: `http://localhost:11434`) |
+| `OLLAMA_MODEL` | Ollama model to use (default: `llama3.2`) |
+| `OLLAMA_TIMEOUT` | Ollama request timeout in seconds (default: `120.0`) |
+| `OLLAMA_KEEP_ALIVE` | Ollama model keep-alive duration (default: `5m`) |
+| `OLLAMA_NUM_CTX` | Context window size for Ollama inference (default: `4096`) |
 | `APP_API_KEY`, `API_AUTH_ENABLED` | Auth for this app's own API (not an LLM key) |
 | `RATE_LIMIT_PER_MINUTE` | Per-IP throttle on LLM-calling endpoints |
 | `DATABASE_URL` | SQLite by default; use a `postgresql://` URL in Docker/production |
@@ -195,6 +201,33 @@ full list with defaults. Notable groups:
 | `MEMORY_RELEVANCE_THRESHOLD`, `MEMORY_SUMMARIZE_*` | Conversation-memory tuning (semantic recall across turns once a conversation summarizes) |
 | `ENABLE_CAG`, `CAG_TOKEN_BUDGET` | Whole-document context instead of ranked retrieval when a conversation's document scope fits the budget (word-count proxy, default 6000) |
 | `ENABLE_REFLECTION_SHORTCUT`, `REFLECTION_SHORTCUT_CONFIDENCE_FLOOR` | Skip the second (reflection) LLM call when a draft is already unambiguously ungrounded — saves a full round-trip |
+
+## Running with Local Ollama
+
+The Exam Prep Bot supports **Ollama** as a first-class provider alongside cloud LLMs.
+
+1. **Install and start Ollama**:
+   Download Ollama from [ollama.com](https://ollama.com) and start the service:
+   ```bash
+   ollama serve
+   ```
+
+2. **Pull your preferred model**:
+   ```bash
+   ollama pull llama3.2
+   # or llama3.1, mistral, gemma2, etc.
+   ```
+
+3. **Configure Exam Prep Bot**:
+   In your `.env` file, set:
+   ```env
+   LLM_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3.2
+   ```
+
+4. **Verify Health**:
+   Start the app (`uvicorn main:app --reload`) and visit `http://localhost:8000/health`. The endpoint reports Ollama connectivity and model availability status.
 
 ## API Endpoints
 

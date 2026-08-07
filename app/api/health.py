@@ -14,24 +14,41 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
+    from app.core.dependencies import get_bot
+
+    llm_health = None
+    try:
+        bot = get_bot()
+        if hasattr(bot.llm, "check_health"):
+            llm_health = bot.llm.check_health()
+    except Exception as e:
+        llm_health = {"status": "error", "error": str(e)}
+
     return {
-        "status": "healthy",
+        "status": "healthy" if not llm_health or llm_health.get("status") == "healthy" else llm_health.get("status"),
         "service": settings.app_name,
         "version": settings.app_version,
+        "llm_provider": settings.llm_provider,
+        "llm_health": llm_health,
     }
 
 
 @router.get("/ready")
 async def readiness_check():
     try:
-        from app.core.dependencies import get_intent_classifier, get_vector_store_manager
+        from app.core.dependencies import get_bot, get_intent_classifier, get_vector_store_manager
 
         stats = get_vector_store_manager().get_stats()
         get_intent_classifier()
+        bot = get_bot()
+        llm_health = bot.llm.check_health() if hasattr(bot.llm, "check_health") else None
+
         return {
             "ready": True,
             "service": settings.app_name,
             "total_vectors": stats["total_vectors"],
+            "llm_provider": settings.llm_provider,
+            "llm_ready": llm_health.get("status") in ("healthy", "degraded") if llm_health else True,
         }
     except Exception as e:
         return {"ready": False, "error": str(e)}

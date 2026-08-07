@@ -23,7 +23,7 @@ flowchart TB
     Orchestrator --> Memory[MemoryAgent]
     ContextR -.decides strategy.-> Retrieval
     Retrieval --> VSM[VectorStoreManager<br/>FAISS + BM25]
-    Knowledge --> LLM[_BaseLLM<br/>Anthropic / OpenAI / Gemini]
+    Knowledge --> LLM[_BaseLLM<br/>Anthropic / OpenAI / Gemini / Ollama]
     Reflection --> LLM
     Memory --> DB[(SQLAlchemy DB<br/>ChatSession / ChatMessageRecord /<br/>ConversationMemory)]
     Memory -.persist=True only.-> VSM

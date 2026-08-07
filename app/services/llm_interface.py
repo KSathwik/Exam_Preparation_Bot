@@ -17,6 +17,7 @@ _DEFAULT_MODELS = {
     "gemini": "gemini-2.0-flash",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-5",
+    "ollama": "llama3.2",
 }
 
 
@@ -24,10 +25,17 @@ class _BaseLLM(ABC):
     """Shared logic for all LLM providers."""
 
     def __init__(self):
-        self.model = settings.model_name or _DEFAULT_MODELS[settings.llm_provider]
+        if settings.llm_provider == "ollama":
+            self.model = settings.model_name or getattr(settings, "ollama_model", None) or _DEFAULT_MODELS["ollama"]
+        else:
+            self.model = settings.model_name or _DEFAULT_MODELS.get(settings.llm_provider, "")
         self.max_tokens = settings.max_tokens
         self.temperature = settings.temperature
         self.top_p = settings.top_p
+
+    def check_health(self) -> dict:
+        """Health check for provider connectivity and readiness."""
+        return {"status": "healthy", "provider": settings.llm_provider, "model": self.model}
 
     @abstractmethod
     def _call(self, system_prompt: str, user_message: str, max_tokens: int | None = None) -> str: ...
@@ -586,12 +594,190 @@ class _AnthropicLLM(_BaseLLM):
             raise
 
 
+class _OllamaLLM(_BaseLLM):
+    """Ollama local LLM provider using httpx client for HTTP API requests."""
+
+    def __init__(self):
+        super().__init__()
+        import httpx
+
+        self.base_url = settings.ollama_base_url.rstrip("/")
+        self.timeout = settings.ollama_timeout
+        self.keep_alive = settings.ollama_keep_alive
+        self.max_retries = settings.ollama_max_retries
+        self.num_ctx = settings.ollama_num_ctx
+        self._client = httpx.Client(base_url=self.base_url, timeout=self.timeout)
+        logger.info(f"LLM provider: Ollama ({self.model} @ {self.base_url})")
+
+    def check_health(self) -> dict:
+        """Validate Ollama server connectivity and model availability."""
+        import httpx
+
+        try:
+            resp = self._client.get("/api/tags", timeout=5.0)
+            if resp.status_code != 200:
+                return {
+                    "status": "unhealthy",
+                    "provider": "ollama",
+                    "model": self.model,
+                    "server_connected": False,
+                    "model_available": False,
+                    "error": f"Ollama HTTP {resp.status_code}",
+                }
+            data = resp.json()
+            raw_models = data.get("models", [])
+            models = [m.get("name", "").split(":")[0] for m in raw_models] + [
+                m.get("name", "") for m in raw_models
+            ]
+            model_found = self.model in models or any(m.get("name", "").startswith(f"{self.model}:") for m in raw_models)
+            return {
+                "status": "healthy" if model_found else "degraded",
+                "provider": "ollama",
+                "model": self.model,
+                "server_connected": True,
+                "model_available": model_found,
+                "available_models": [m.get("name") for m in raw_models],
+                "error": None if model_found else f"Model '{self.model}' not found on Ollama server.",
+            }
+        except httpx.ConnectError:
+            return {
+                "status": "unhealthy",
+                "provider": "ollama",
+                "model": self.model,
+                "server_connected": False,
+                "model_available": False,
+                "error": f"Could not connect to Ollama server at {self.base_url}. Is Ollama running?",
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "provider": "ollama",
+                "model": self.model,
+                "server_connected": False,
+                "model_available": False,
+                "error": str(e),
+            }
+
+    def _call(self, system_prompt: str, user_message: str, max_tokens: int | None = None) -> str:
+        import httpx
+
+        logger.debug(
+            f"Ollama._call: model={self.model}  max_tokens={max_tokens or self.max_tokens}  "
+            f"temp={self.temperature}  url={self.base_url}"
+        )
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "num_predict": max_tokens or self.max_tokens,
+                "num_ctx": self.num_ctx,
+            },
+        }
+
+        start = time.time()
+        last_exception = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response = self._client.post("/api/chat", json=payload, timeout=self.timeout)
+                if response.status_code == 404:
+                    msg = (
+                        f"Ollama model '{self.model}' not found at {self.base_url}. "
+                        f"Please pull the model using: 'ollama pull {self.model}'"
+                    )
+                    logger.error(msg)
+                    raise RuntimeError(msg)
+                response.raise_for_status()
+                data = response.json()
+                duration = time.time() - start
+                content = data.get("message", {}).get("content", "")
+                logger.debug(
+                    f"Ollama._call OK: duration={duration:.2f}s  response_length={len(content)}  "
+                    f"eval_count={data.get('eval_count', '?')}"
+                )
+                return content
+            except httpx.ConnectError as e:
+                duration = time.time() - start
+                msg = (
+                    f"Could not connect to Ollama server at {self.base_url} (attempt {attempt}/{self.max_retries}). "
+                    f"Ensure Ollama is installed and running (`ollama serve`). Details: {e}"
+                )
+                logger.warning(msg)
+                last_exception = RuntimeError(msg)
+            except httpx.TimeoutException as e:
+                duration = time.time() - start
+                msg = (
+                    f"Ollama request timed out after {self.timeout}s (attempt {attempt}/{self.max_retries}). "
+                    f"Consider increasing OLLAMA_TIMEOUT. Details: {e}"
+                )
+                logger.warning(msg)
+                last_exception = RuntimeError(msg)
+            except httpx.HTTPStatusError as e:
+                duration = time.time() - start
+                msg = f"Ollama returned HTTP error {e.response.status_code}: {e.response.text}"
+                logger.error(msg)
+                if e.response.status_code in (400, 404):
+                    raise RuntimeError(msg) from e
+                last_exception = RuntimeError(msg)
+            except RuntimeError:
+                raise
+            except Exception as e:
+                duration = time.time() - start
+                msg = f"Ollama._call failed: {type(e).__name__}: {e}"
+                logger.error(msg)
+                last_exception = e
+
+            if attempt < self.max_retries:
+                time.sleep(0.5 * (2 ** (attempt - 1)))
+
+        raise last_exception or RuntimeError(f"Ollama call failed after {self.max_retries} attempts.")
+
+    def _stream_call(self, system_prompt: str, user_message: str, max_tokens: int | None = None):
+        """Generator yielding response text chunks incrementally from Ollama streaming API."""
+        import json
+        import httpx
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": True,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "num_predict": max_tokens or self.max_tokens,
+                "num_ctx": self.num_ctx,
+            },
+        }
+
+        with self._client.stream("POST", "/api/chat", json=payload, timeout=self.timeout) as response:
+            if response.status_code == 404:
+                raise RuntimeError(f"Ollama model '{self.model}' not found on server.")
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    chunk = data.get("message", {}).get("content", "")
+                    if chunk:
+                        yield chunk
+
+
 # ── Factory ───────────────────────────────────────────────────────────
 
 _PROVIDERS = {
     "gemini": _GeminiLLM,
     "openai": _OpenAILLM,
     "anthropic": _AnthropicLLM,
+    "ollama": _OllamaLLM,
 }
 
 

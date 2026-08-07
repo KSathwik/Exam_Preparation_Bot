@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     api_prefix: str = "/api/v1"
 
-    # LLM Provider: "gemini", "openai", or "anthropic"
+    # LLM Provider: "gemini", "openai", "anthropic", or "ollama"
     llm_provider: str = "gemini"
 
     # API Keys (only the one matching llm_provider is required)
@@ -44,7 +44,15 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
 
-    # Model defaults per provider (overridden by model_name if set)
+    # Ollama Local LLM configuration
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: Optional[str] = None
+    ollama_timeout: float = 120.0
+    ollama_keep_alive: str = "5m"
+    ollama_max_retries: int = 3
+    ollama_num_ctx: int = 4096
+
+    # Model defaults per provider (overridden by model_name or ollama_model if set)
     model_name: Optional[str] = None
     # 700 was cutting off comprehensive/multi-section answers mid-word once
     # the draft actually needed the space (e.g. several categorized lists) —
