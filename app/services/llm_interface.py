@@ -745,6 +745,7 @@ class _OllamaLLM(_BaseLLM):
     def _stream_call(self, system_prompt: str, user_message: str, max_tokens: int | None = None):
         """Generator yielding response text chunks incrementally from Ollama streaming API."""
         import json
+
         import httpx
 
         payload = {
