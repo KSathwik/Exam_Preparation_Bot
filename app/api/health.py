@@ -25,7 +25,9 @@ async def health_check():
         llm_health = {"status": "error", "error": str(e)}
 
     return {
-        "status": "healthy" if not llm_health or llm_health.get("status") == "healthy" else llm_health.get("status"),
+        "status": (
+            "healthy" if not llm_health or llm_health.get("status") == "healthy" else llm_health.get("status")
+        ),
         "service": settings.app_name,
         "version": settings.app_version,
         "llm_provider": settings.llm_provider,

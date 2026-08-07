@@ -26,7 +26,9 @@ class _BaseLLM(ABC):
 
     def __init__(self):
         if settings.llm_provider == "ollama":
-            self.model = settings.model_name or getattr(settings, "ollama_model", None) or _DEFAULT_MODELS["ollama"]
+            self.model = (
+                settings.model_name or getattr(settings, "ollama_model", None) or _DEFAULT_MODELS["ollama"]
+            )
         else:
             self.model = settings.model_name or _DEFAULT_MODELS.get(settings.llm_provider, "")
         self.max_tokens = settings.max_tokens
@@ -629,7 +631,9 @@ class _OllamaLLM(_BaseLLM):
             models = [m.get("name", "").split(":")[0] for m in raw_models] + [
                 m.get("name", "") for m in raw_models
             ]
-            model_found = self.model in models or any(m.get("name", "").startswith(f"{self.model}:") for m in raw_models)
+            model_found = self.model in models or any(
+                m.get("name", "").startswith(f"{self.model}:") for m in raw_models
+            )
             return {
                 "status": "healthy" if model_found else "degraded",
                 "provider": "ollama",
